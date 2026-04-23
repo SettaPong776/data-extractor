@@ -269,6 +269,7 @@ class WordExtractor {
 
             // Table 6: Bidders (Light Blue)
             let biddersStr = '-';
+            let blob = '';
             if (t6 && t6.rows.length > 0) {
                 const bidders = t6.rows.map(r => {
                     const name = r.length >= 2 ? r[r.length - 2] : '';
@@ -276,6 +277,37 @@ class WordExtractor {
                     return `${name}/ ${price} บาท`.trim();
                 }).filter(b => b.length > 5);
                 if (bidders.length > 0) biddersStr = bidders.join('\n');
+                
+                // Keep the raw text for fallback parsing
+                blob = t6.rows.map(r => r.join(' ')).join(' ');
+            }
+            
+            // --- NEW: Layout Table Fallback Strategy ---
+            // If the document is purely a layout table, data is squashed into t6's rows.
+            if (blob.length > 50) {
+                // 1. Extract Project Name from "รายการพิจารณา"
+                if (!projName || projName === '(ไม่พบชื่อโครงการ)' || projName.length > 100 || /^\d+$/.test(projName)) {
+                    const pMatch = blob.match(/ราคาที่เสนอ\s*\d+\s*(.*?)\s*\d{13}/);
+                    if (pMatch) projName = pMatch[1].trim();
+                }
+
+                // 2. Extract Budget and Median Price
+                // Matches "8198 บาท8198 บาท" or "8,198.00 บาท 8,198.00 บาท"
+                if (!budget || budget.length >= 10 || budget === medianPrice) {
+                    const bmMatch = blob.match(/([\d,]+(?:\.\d{2})?)\s*บาท\s*([\d,]+(?:\.\d{2})?)\s*บาท/);
+                    if (bmMatch) {
+                        budget = bmMatch[1];
+                        medianPrice = bmMatch[2];
+                    }
+                }
+
+                // 3. Clean up biddersStr if it's a huge mashed string
+                if (biddersStr.length > 150 && biddersStr.includes('รายชื่อผู้เสนอราคา')) {
+                    const bidderMatch = blob.match(/\d{13}\s*(.*?)\s*([\d,]+\.\d{2})\s*(?:ผู้ที่ได้รับ|$)/);
+                    if (bidderMatch) {
+                        biddersStr = `${bidderMatch[1].trim()}/ ${bidderMatch[2]} บาท`;
+                    }
+                }
             }
 
             // Table 7: Winners
