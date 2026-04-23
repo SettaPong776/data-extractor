@@ -188,7 +188,8 @@ class WordExtractor {
         // Auto-detect Non-eGP table format (e.g., สขร.1)
         const isNonEGP = allTables.some(t => {
             const firstFewRowsText = t.rows.slice(0, 3).map(r => r.join(' ')).join(' ');
-            return firstFewRowsText.includes('ชื่อผู้ประกอบการ') && firstFewRowsText.includes('รายการพัสดุ');
+            return /(ชื่อผู้ประกอบการ|ชื่อผู้ประกอบกำร)/.test(firstFewRowsText) && 
+                   /(รายการพัสดุ|รำยกำรพัสดุ)/.test(firstFewRowsText);
         });
 
         if (isNonEGP) {
@@ -455,8 +456,8 @@ class WordExtractor {
                 if (r.length < 5) continue;
                 
                 const rowStr = r.join(' ');
-                // Skip header rows
-                if (/(?:ลำดับ|ผู้ประกอบการ|รายการ|จำนวนเงิน|เอกสาร|เหตุผล)/.test(rowStr)) continue;
+                // Skip header rows (accounting for TH Sarabun garbled characters)
+                if (/(?:ลำดับ|ผู้ประกอบ|รายการ|รำยกำร|จำนวน|จํำนวน|เอกสาร|เหตุผล)/.test(rowStr)) continue;
                 
                 // Usually data rows have a valid company name in column 2
                 if (!r[1] || r[1].trim() === '') continue;
