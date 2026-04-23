@@ -152,41 +152,42 @@ class WordExtractor {
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
 
-        // Collect ALL paragraphs and tables in document order
-        const allParagraphs = [];
+        // Parse ALL tables from the document
+        const htmlTables = doc.querySelectorAll('table');
         const allTables = [];
-
-        // Use querySelectorAll to get all p and table in document order
-        const allElements = doc.querySelectorAll('p, table');
-        const orderedItems = []; // { type, index, element }
-
-        allElements.forEach((el, i) => {
-            // Skip nested tables (tables inside tables)
-            if (el.tagName === 'TABLE' && el.closest('table') !== el) return;
-            // Skip paragraphs inside tables
-            if (el.tagName === 'P' && el.closest('table')) return;
-
-            if (el.tagName === 'TABLE') {
-                const td = this._parseHTMLTable(el);
-                if (td && (td.rows.length > 0 || td.headers.length > 0)) {
-                    orderedItems.push({ type: 'table', data: td, order: i });
-                    allTables.push({ data: td, order: i });
-                }
-            } else {
-                const t = el.textContent.trim();
-                if (t) {
-                    orderedItems.push({ type: 'text', data: t, order: i });
-                    allParagraphs.push({ data: t, order: i });
-                }
+        htmlTables.forEach(table => {
+            // Skip nested tables
+            if (table.parentElement && table.parentElement.closest('table')) return;
+            const td = this._parseHTMLTable(table);
+            if (td && (td.rows.length > 0 || td.headers.length > 0)) {
+                allTables.push(td);
             }
         });
 
-        console.log(`[e-GP DOCX] Found ${allParagraphs.length} paragraphs, ${allTables.length} tables`);
+        // Split HTML by <table> tags to get text BETWEEN tables
+        const htmlParts = html.split(/<table[\s>]/i);
+        // htmlParts[0] = text before first table
+        // htmlParts[1] = table1 content + text after table1
+        // We need to extract text after each </table> closing tag
+
+        const textBetweenTables = []; // text chunks: [before_t0, between_t0_t1, between_t1_t2, ...]
+        
+        // First chunk: everything before first table
+        textBetweenTables.push(this._htmlToText(htmlParts[0]));
+        
+        // Remaining chunks: text AFTER each </table>
+        for (let i = 1; i < htmlParts.length; i++) {
+            const afterClose = htmlParts[i].split(/<\/table>/i);
+            // The text after the closing </table> tag
+            const textAfter = afterClose.length > 1 ? afterClose.slice(1).join('') : '';
+            textBetweenTables.push(this._htmlToText(textAfter));
+        }
+
+        console.log(`[e-GP DOCX] Found ${allTables.length} tables, ${textBetweenTables.length} text chunks`);
 
         // Strategy: Pair tables as (table6, table7) for each form
-        // Each form has 2 tables, so forms = allTables.length / 2
         const numForms = Math.floor(allTables.length / 2);
-        console.log(`[e-GP DOCX] Detected ${numForms} forms (${allTables.length} tables / 2)`);
+        console.log(`[e-GP DOCX] Detected ${numForms} forms`);
 
         const egpRows = [];
 
@@ -194,19 +195,16 @@ class WordExtractor {
             const t6 = allTables[fi * 2];     // Table 6 (bidders)
             const t7 = allTables[fi * 2 + 1]; // Table 7 (winners)
 
-            // Find text paragraphs BEFORE table 6 (between previous table7 and current table6)
-            const prevTableOrder = fi > 0 ? allTables[fi * 2 - 1].order : -1;
-            const currentT6Order = t6.order;
-
-            const sectionTexts = allParagraphs
-                .filter(p => p.order > prevTableOrder && p.order < currentT6Order)
-                .map(p => p.data);
+            // Text before table 6 = textBetweenTables[fi * 2]
+            // Text between table 6 and table 7 = textBetweenTables[fi * 2 + 1]
+            const sectionText = textBetweenTables[fi * 2] || '';
+            const lines = sectionText.split('\n').map(l => l.trim()).filter(l => l);
 
             // Parse sections from these paragraphs
             const sections = {};
             let currentSection = 0;
 
-            for (const line of sectionTexts) {
+            for (const line of lines) {
                 const m = line.match(/^(\d)\s*\./);
                 if (m) {
                     const num = parseInt(m[1]);
@@ -221,6 +219,8 @@ class WordExtractor {
                 }
             }
             for (const k in sections) sections[k] = (sections[k] || '').trim();
+
+            if (fi === 0) console.log(`[e-GP DOCX] Form 1 sections:`, JSON.stringify(sections));
 
             // Section 3: Project Name (Yellow)
             let projName = sections[3] || '';
@@ -242,8 +242,8 @@ class WordExtractor {
 
             // Table 6: Bidders (Light Blue)
             let biddersStr = '-';
-            if (t6.data && t6.data.rows.length > 0) {
-                const bidders = t6.data.rows.map(r => {
+            if (t6 && t6.rows.length > 0) {
+                const bidders = t6.rows.map(r => {
                     const name = r.length >= 2 ? r[r.length - 2] : '';
                     const price = r.length >= 1 ? r[r.length - 1] : '';
                     return `${name}/ ${price} บาท`.trim();
@@ -257,8 +257,8 @@ class WordExtractor {
             let contractId = '';
             let contractDate = '';
 
-            if (t7.data && t7.data.rows.length > 0) {
-                const dataRows = t7.data.rows.filter(r => r.some(c => /\d{10,}/.test(c)));
+            if (t7 && t7.rows.length > 0) {
+                const dataRows = t7.rows.filter(r => r.some(c => /\d{10,}/.test(c)));
                 if (dataRows.length > 0) {
                     const r = dataRows[0];
                     const rowStr = r.join(' ');
@@ -303,5 +303,15 @@ class WordExtractor {
             columnCount: 10,
             pageNumber: 1
         }];
+    }
+
+    /**
+     * Strip HTML tags and return plain text
+     */
+    _htmlToText(html) {
+        if (!html) return '';
+        const tmp = document.createElement('div');
+        tmp.innerHTML = html;
+        return tmp.textContent || tmp.innerText || '';
     }
 }
