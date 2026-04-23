@@ -263,6 +263,7 @@ class PDFExtractor {
 
     /**
      * Smart e-GP Extractor: Extracts specific fields from Thai e-GP forms
+     * Uses LINE-BY-LINE section detection (immune to garbled Thai fonts)
      * 1 Page = 1 Row
      */
     async extractEGP(file, onProgress) {
@@ -289,161 +290,185 @@ class PDFExtractor {
                         height: Math.abs(item.transform[3]) || 12
                     }));
 
-                if (items.length < this.MIN_ROW_ITEMS) continue;
-                
-                // Sorting for fullText (Reading order: top-bottom, left-right)
-                const sortedItems = [...items].sort((a, b) => {
-                    if (Math.abs(a.y - b.y) <= this.Y_TOLERANCE) {
-                        return a.x - b.x;
+                if (items.length < 3) continue;
+
+                // Group items into lines (sorted by Y then X)
+                const lines = this._clusterByY(items);
+
+                // Build sections by detecting leading numbers "1." through "7."
+                const sections = {};
+                let currentSection = 0;
+
+                for (const line of lines) {
+                    const lineText = line.map(i => i.text).join(' ');
+
+                    // Check if line starts a new numbered section
+                    // Look for patterns: "3.", "3 .", "3.ชื่อ", etc.
+                    let newSection = 0;
+                    const firstText = line[0].text;
+                    
+                    // Case 1: First item is just a digit "3" and second is "." or starts with "."
+                    if (/^\d$/.test(firstText) && line.length > 1) {
+                        const second = line[1].text;
+                        if (second === '.' || second.startsWith('.')) {
+                            newSection = parseInt(firstText);
+                        }
                     }
-                    return a.y - b.y;
+                    // Case 2: First item is "3." or "3.ชื่อ"
+                    if (!newSection) {
+                        const m = firstText.match(/^(\d)\s*\./);
+                        if (m) newSection = parseInt(m[1]);
+                    }
+                    // Case 3: lineText starts with "3." pattern
+                    if (!newSection) {
+                        const m = lineText.match(/^(\d)\s*\./);
+                        if (m) newSection = parseInt(m[1]);
+                    }
+
+                    if (newSection >= 1 && newSection <= 7) {
+                        currentSection = newSection;
+                        // Remove the "N." prefix from content
+                        const afterNum = lineText.replace(/^\d\s*\.\s*/, '');
+                        sections[currentSection] = afterNum;
+                    } else if (currentSection >= 1 && currentSection <= 5) {
+                        // Append multi-line content to sections 1-5 only
+                        sections[currentSection] = (sections[currentSection] || '') + ' ' + lineText;
+                    }
+                    // Sections 6 and 7 are tables — handled separately below
+                }
+
+                // Clean sections
+                for (const k in sections) {
+                    sections[k] = (sections[k] || '').trim();
+                }
+
+                // === Section 3: Project Name (Yellow) ===
+                let projName = sections[3] || '';
+                // Strip leading label (handles garbled "ชอื่โครงการ" etc.)
+                projName = projName.replace(/^.*?[กา]ร\s+/, function(match) {
+                    // Only strip if it looks like "ชื่อโครงการ" label (max 15 chars)
+                    return match.length <= 15 ? '' : match;
                 });
-                const fullText = sortedItems.map(i => i.text).join(' ');
-
-                // Extract Fields using Number-based markers (Bulletproof against Thai spacing issues)
-                let projName = '';
-                let budget = '';
-                let medianPrice = '';
-
-                // Use \s* around dots to handle weird PDF.js spacing
-                const match3 = fullText.match(/3\s*\.\s*(.*?)(?:4\s*\.|5\s*\.)/);
-                const match4 = fullText.match(/4\s*\.\s*(.*?)(?:5\s*\.|6\s*\.)/);
-                const match5 = fullText.match(/5\s*\.\s*(.*?)(?:6\s*\.|7\s*\.)/);
-
-                if (match3) {
-                    let raw = match3[1].trim();
-                    let clean = raw.replace(/^[\s\S]{0,15}โครงการ\s*/, '');
-                    projName = clean.length > 3 ? clean : raw;
-                }
-                if (match4) {
-                    let raw = match4[1].trim();
-                    let clean = raw.replace(/^[\s\S]{0,15}ประมาณ\s*/, '');
-                    budget = clean.length > 1 ? clean : raw;
-                }
-                if (match5) {
-                    let raw = match5[1].trim();
-                    let clean = raw.replace(/^[\s\S]{0,15}กลาง\s*/, '');
-                    medianPrice = clean.length > 1 ? clean : raw;
+                // If still has label, try simpler strip
+                if (projName.length > 5) {
+                    projName = projName.replace(/^.*?โครงการ\s*/, '');
                 }
 
-                // If number-based fails, fallback to permissive text-based Regex
-                if (!projName) {
-                    const pProj = fullText.match(/ชื่อโครงการ\s*(.*?)\s*(?:งบประมาณ|4\.|ราคากลาง)/);
-                    if (pProj) projName = pProj[1].trim();
-                }
-                if (!budget) {
-                    const pBudg = fullText.match(/งบประมาณ\s*(.*?)\s*(?:ราคากลาง|5\.|รายชื่อผู้เสนอ|6\.)/);
-                    if (pBudg) budget = pBudg[1].trim();
-                }
-                if (!medianPrice) {
-                    const pMed = fullText.match(/ราคากลาง\s*(.*?)\s*(?:รายชื่อ|6\.|ผู้ได้รับ|7\.)/);
-                    if (pMed) medianPrice = pMed[1].trim();
-                }
-
+                // Extract method from project name
                 let method = '';
-                const pMethod = projName.match(/วิธี([ก-๙a-zA-Z]+)/);
-                if (pMethod) {
-                    method = pMethod[1].trim();
-                } else if (fullText.includes('เฉพาะเจาะจง')) {
-                    method = 'เฉพาะเจาะจง';
-                } else if (fullText.includes('ประกวดราคา')) {
-                    method = 'ประกวดราคา';
-                } else if (fullText.includes('คัดเลือก')) {
-                    method = 'คัดเลือก';
+                const methodMatch = projName.match(/\s*โดยวิธี(.*?)$/);
+                if (methodMatch) {
+                    method = methodMatch[1].trim();
+                    projName = projName.replace(/\s*โดยวิธี.*$/, '').trim();
+                }
+                // Fallback method detection from full page text
+                if (!method) {
+                    const fullText = lines.map(l => l.map(i => i.text).join(' ')).join(' ');
+                    if (fullText.match(/วิธี\s*เฉพาะ/)) method = 'เฉพาะเจาะจง';
+                    else if (fullText.match(/ประกวดราคา/)) method = 'ประกวดราคา';
+                    else if (fullText.match(/วิธี\s*คัดเลือก/)) method = 'คัดเลือก';
                 }
 
-                // Extract Tables to find Bidders and Winners
-                const tables = this._extractTablesFromPage(items, pageNum);
-                
-                // Find Table 6 and 7 using column counts (Immune to garbled Thai fonts)
-                let table6 = tables.find(t => t.columnCount >= 4 && t.columnCount <= 6);
-                let table7 = tables.find(t => t.columnCount >= 7);
-                
-                if (!table6 && tables.length > 0) table6 = tables[0];
-                if (!table7 && tables.length > 1) table7 = tables[1];
+                // === Section 4: Budget (Dark Green) ===
+                let budget = sections[4] || '';
+                budget = budget.replace(/^.*?[มณ]\s+/, function(m) { return m.length <= 15 ? '' : m; });
+                budget = budget.replace(/\s*บาท\s*$/, '').trim();
 
-                // Format Table 6 (Bidders)
+                // === Section 5: Median Price (Light Green) ===
+                let medianPrice = sections[5] || '';
+                medianPrice = medianPrice.replace(/^.*?กลาง\s*/, '');
+                medianPrice = medianPrice.replace(/\s*บาท\s*$/, '').trim();
+
+                // === Tables 6 & 7: Bidders and Winners ===
+                const tables = this._extractTablesFromPage(items, pageNum);
+
+                // Identify tables by column count and Tax ID presence
+                let table6 = null;
+                let table7 = null;
+                for (const t of tables) {
+                    const hasData = t.rows.some(r => r.some(c => /\d{13}/.test(c)));
+                    if (!hasData) continue;
+                    if (t.columnCount >= 7 && !table7) {
+                        table7 = t;
+                    } else if (t.columnCount >= 3 && !table6) {
+                        table6 = t;
+                    }
+                }
+                // Fallback: first table = table6, second = table7
+                if (!table6 && !table7) {
+                    if (tables.length >= 2) { table6 = tables[0]; table7 = tables[1]; }
+                    else if (tables.length === 1) { table6 = tables[0]; }
+                }
+
+                // Format Table 6 (Bidders — Light Blue)
                 let bidders = [];
                 if (table6) {
-                    // Filter data rows by checking for 13-digit Tax ID
-                    const dataRows = table6.rows.filter(r => r.some(cell => /\d{13}/.test(cell)));
+                    const dataRows = table6.rows.filter(r =>
+                        r.some(cell => /\d{13}/.test(cell)) || r.some(cell => /[\d,]+\.\d{2}/.test(cell))
+                    );
                     bidders = dataRows.map(r => {
                         const name = r.length >= 2 ? r[r.length - 2] : '';
-                        const price = r.length >= 1 ? r[r.length - 1] : r.join(' ');
-                        return `${name} / ${price}`.trim();
+                        const price = r.length >= 1 ? r[r.length - 1] : '';
+                        return `${name}/ ${price} บาท`.trim();
                     });
                 }
                 const biddersStr = bidders.join('\n') || '-';
 
-                // Format Table 7 (Winners)
-                let winners = [];
+                // Format Table 7 (Winners — Blue + Grey + Pink + Red)
+                let winnersStr = '-';
                 let reason = '';
                 let contractId = '';
                 let contractDate = '';
-                
+
                 if (table7) {
-                    // Filter data rows by checking for 13-digit Tax ID
                     const dataRows = table7.rows.filter(r => r.some(cell => /\d{13}/.test(cell)));
                     if (dataRows.length > 0) {
-                        const r = dataRows[0]; // Take first winner
+                        const r = dataRows[0];
+                        // Column mapping for Table 7:
+                        // [0]=ลำดับ [1]=เลขภาษี [2]=ชื่อผู้ขาย [3]=เลขคุมe-GP [4]=เลขสัญญา [5]=วันที่ [6]=จำนวนเงิน [7]=สถานะ [8]=เหตุผล
                         const name = r.length > 2 ? r[2] : '';
                         const price = r.length > 6 ? r[6] : (r.length > 1 ? r[r.length - 2] : '');
-                        winners.push(`${name} / ${price}`);
-                        
+                        winnersStr = `${name}/ ${price} บาท`.trim();
+
                         reason = r[r.length - 1] || '';
-                        
-                        // Extract e-GP ID (Pink) and Date (Red) using regex on the row to be safe
+
+                        // e-GP contract ID (Pink) — 12-digit starting with 6
                         const rowStr = r.join(' ');
                         const eGpMatch = rowStr.match(/(6\d{11})/);
-                        if (eGpMatch) {
-                            contractId = eGpMatch[1];
-                        } else {
-                            contractId = r.length > 3 ? r[3] : ''; // Fallback to column index
-                        }
+                        contractId = eGpMatch ? eGpMatch[1] : (r.length > 3 ? r[3] : '');
 
+                        // Contract date (Red)
                         const dateMatch = rowStr.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
-                        if (dateMatch) {
-                            contractDate = dateMatch[1];
-                        } else {
-                            contractDate = r.length > 5 ? r[5] : ''; // Fallback
-                        }
+                        contractDate = dateMatch ? dateMatch[1] : (r.length > 5 ? r[5] : '');
                     }
                 }
-                const winnersStr = winners.join('\n') || '-';
 
-                // We push everything so user sees what happened
-                if (projName || budget || fullText.length > 50) {
-                    if (!projName && !budget) {
-                        projName = "⚠️ สกัดข้อมูลไม่สำเร็จ";
-                        budget = fullText.substring(0, 150) + "... (โปรดตรวจสอบไฟล์ต้นฉบับว่าใช่รูปแบบ e-GP หรือไม่ หรือเป็นไฟล์สแกน)";
-                    }
-
-                    egpRows.push([
-                        egpRows.length + 1, // index (1)
-                        projName,           // (2) Yellow
-                        budget,             // (3) Dark Green
-                        medianPrice,        // (4) Light Green
-                        method,             // (5) White
-                        biddersStr,         // (6) Light Blue
-                        winnersStr,         // (7) Blue
-                        reason,             // (8) Grey
-                        contractId,         // (9) Pink (e-GP ID)
-                        contractDate        // (10) Red (Date)
-                    ]);
-                } else if (fullText.trim().length === 0) {
+                // Always push a row so the user can see results
+                if (projName || budget || items.length > 10) {
                     egpRows.push([
                         egpRows.length + 1,
-                        "⚠️ ไฟล์นี้ไม่มีข้อความ (อาจเป็นไฟล์รูปภาพ/สแกน โปรแกรมไม่สามารถอ่านได้)",
-                        "", "", "", "", "", "", "", ""
+                        projName || '(ไม่พบชื่อโครงการ)',
+                        budget,
+                        medianPrice,
+                        method,
+                        biddersStr,
+                        winnersStr,
+                        reason,
+                        contractId,
+                        contractDate
                     ]);
                 }
 
             } catch (err) {
                 console.warn(`Error processing page ${pageNum} in e-GP mode:`, err);
+                egpRows.push([
+                    egpRows.length + 1,
+                    `⚠️ ข้อผิดพลาดหน้า ${pageNum}: ${err.message}`,
+                    '', '', '', '', '', '', '', ''
+                ]);
             }
         }
 
-        // Return a single consolidated table
         return [{
             headers: [
                 "ลำดับที่",
