@@ -282,29 +282,60 @@ class WordExtractor {
                 blob = t6.rows.map(r => r.join(' ')).join(' ');
             }
             
-            // --- NEW: Layout Table Fallback Strategy ---
-            // If the document is purely a layout table, data is squashed into t6's rows.
-            if (blob.length > 50) {
-                // 1. Extract Project Name from "รายการพิจารณา"
-                if (!projName || projName === '(ไม่พบชื่อโครงการ)' || projName.length > 100 || /^\d+$/.test(projName)) {
-                    const pMatch = blob.match(/ราคาที่เสนอ\s*\d+\s*(.*?)\s*\d{13}/);
-                    if (pMatch) projName = pMatch[1].trim();
+            // --- NEW: Table 6 / Layout Table Fallback Strategy ---
+            
+            // 1. Extract Project Name from Table 6
+            if (!projName || projName === '(ไม่พบชื่อโครงการ)' || projName.length > 100 || /^\d+$/.test(projName)) {
+                // Case A: Table parsed into proper columns
+                if (t6 && t6.rows.length > 0) {
+                    const firstRow = t6.rows[0];
+                    const taxIdIndex = firstRow.findIndex(c => /\d{13}/.test(c));
+                    if (taxIdIndex >= 1) {
+                        projName = firstRow[taxIdIndex - 1].trim();
+                        projName = projName.replace(/^\d+\s+/, '').trim();
+                    }
                 }
+                
+                // Case B: Table mashed into a blob
+                if (!projName || projName === '(ไม่พบชื่อโครงการ)') {
+                    if (blob.length > 50) {
+                        let pMatch = blob.match(/ราคาที่เสนอ\s*\d+\s*(.*?)\s*\d{13}/);
+                        if (!pMatch) {
+                            pMatch = blob.match(/(?:^\d+\s+|\s+\d+\s+)(\S.*?)\s+\d{13}/);
+                        }
+                        if (pMatch) {
+                            projName = pMatch[1].replace(/^\d+\s*/, '').trim();
+                        }
+                    }
+                }
+            }
 
-                // 2. Extract Budget, Median, and clean Bidder from the proposed price
-                // User requested: "ดูเลขจาก column รายชื่อผู้เสนอราคา... ให้ดึงแต่ตัวเลขเงินมา เช่น 8,198.00 บาท จะแสดง ใน วงเงิน... กับ ราคากลาง"
+            // 2. Extract Budget, Median, and clean Bidder from the proposed price
+            // User requested: "ดูเลขจาก column รายชื่อผู้เสนอราคา... ให้ดึงแต่ตัวเลขเงินมา เช่น 8,198.00 บาท จะแสดง ใน วงเงิน... กับ ราคากลาง"
+            let proposedPrice = '';
+            
+            // Try from the clean biddersStr first
+            if (biddersStr && biddersStr !== '-') {
+                const priceMatch = biddersStr.match(/([\d,]+\.\d{2})/);
+                if (priceMatch) proposedPrice = priceMatch[1];
+            }
+            
+            // Try from the blob if it's a huge mashed string
+            if (!proposedPrice && blob.length > 50) {
                 const bidderMatch = blob.match(/\d{13}\s*(.*?)\s*([\d,]+\.\d{2})/);
                 if (bidderMatch) {
-                    const proposedPrice = bidderMatch[2]; // e.g., "8,198.00"
-                    
-                    budget = proposedPrice;
-                    medianPrice = proposedPrice;
-                    
-                    // Clean up biddersStr if it's a huge mashed string
+                    proposedPrice = bidderMatch[2]; // e.g., "8,198.00"
+                    // Clean up biddersStr
                     if (biddersStr.length > 150) {
                         biddersStr = `${bidderMatch[1].trim()}/ ${proposedPrice} บาท`;
                     }
                 }
+            }
+
+            // Apply the proposed price to Budget and Median Price ALWAYS
+            if (proposedPrice) {
+                budget = proposedPrice;
+                medianPrice = proposedPrice;
             }
 
             // Table 7: Winners
