@@ -376,8 +376,20 @@ class WordExtractor {
                         if (fallbackMatch) contractId = fallbackMatch[1];
                     }
                     
-                    const dateMatch = rowStr.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
-                    contractDate = dateMatch ? dateMatch[1] : '';
+                    const dateMatch = rowStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+                    if (dateMatch) {
+                        const d = parseInt(dateMatch[1], 10);
+                        const m = parseInt(dateMatch[2], 10);
+                        const y = dateMatch[3];
+                        const thaiMonths = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+                        if (m >= 1 && m <= 12) {
+                            contractDate = `${d} ${thaiMonths[m]} ${y}`;
+                        } else {
+                            contractDate = dateMatch[0];
+                        }
+                    } else {
+                        contractDate = '';
+                    }
                 }
             }
 
