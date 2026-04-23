@@ -150,9 +150,33 @@
             }
 
             state.tables = tables;
+
+            // Merge all tables into 1 single table
+            if (state.tables.length > 1) {
+                // Find the table with the most columns to use as base
+                let baseTable = state.tables.reduce((a, b) => a.columnCount >= b.columnCount ? a : b);
+                let mergedRows = [];
+                
+                state.tables.forEach(t => {
+                    t.rows.forEach(row => {
+                        // Pad rows to match base column count
+                        while (row.length < baseTable.columnCount) row.push('');
+                        mergedRows.push(row.slice(0, baseTable.columnCount));
+                    });
+                });
+
+                state.tables = [{
+                    headers: baseTable.headers,
+                    rows: mergedRows,
+                    columnCount: baseTable.columnCount,
+                    pageNumber: 1
+                }];
+            }
+
             state.activeTableIndex = 0;
 
-            showToast(`พบ ${tables.length} ตาราง, ${tables.reduce((s, t) => s + t.rows.length, 0)} แถวข้อมูล`, 'success');
+            const totalRows = state.tables.reduce((s, t) => s + t.rows.length, 0);
+            showToast(`พบ ${totalRows} แถวข้อมูล (รวมเป็น 1 ตาราง)`, 'success');
 
             // Auto go to preview
             setTimeout(() => goToStep(2), 600);
