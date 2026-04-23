@@ -459,6 +459,10 @@ class WordExtractor {
                 // Skip header rows (accounting for TH Sarabun garbled characters)
                 if (/(?:ลำดับ|ผู้ประกอบ|รายการ|รำยกำร|จำนวน|จํำนวน|เอกสาร|เหตุผล)/.test(rowStr)) continue;
                 
+                // Skip sub-header rows that contain literal (1), (2), (3) etc.
+                if (r[0] && /^\s*\(\s*[1-9]\s*\)\s*$/.test(r[0])) continue;
+                if (r[1] && /^\s*\(\s*[1-9]\s*\)\s*$/.test(r[1])) continue;
+                
                 // Usually data rows have a valid company name in column 2
                 if (!r[1] || r[1].trim() === '') continue;
 
