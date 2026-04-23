@@ -94,8 +94,8 @@
 
     function handleFile(file) {
         const ext = file.name.split('.').pop().toLowerCase();
-        if (!['pdf', 'docx'].includes(ext)) {
-            showToast('รองรับเฉพาะไฟล์ PDF และ DOCX', 'error');
+        if (ext !== 'docx') {
+            showToast('รองรับเฉพาะไฟล์ DOCX', 'error');
             return;
         }
 
