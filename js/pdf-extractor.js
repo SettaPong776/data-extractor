@@ -300,15 +300,44 @@ class PDFExtractor {
                 });
                 const fullText = sortedItems.map(i => i.text).join(' ');
 
-                // Extract Fields using more permissive Regex
-                const pProj = fullText.match(/ชื่อโครงการ\s*(.*?)\s*(?:งบประมาณ|4\.|ราคากลาง)/);
-                let projName = pProj ? pProj[1].trim() : '';
+                // Extract Fields using Number-based markers (Bulletproof against Thai spacing issues)
+                let projName = '';
+                let budget = '';
+                let medianPrice = '';
 
-                const pBudg = fullText.match(/งบประมาณ\s*(.*?)\s*(?:ราคากลาง|5\.|รายชื่อผู้เสนอ|6\.)/);
-                let budget = pBudg ? pBudg[1].trim() : '';
+                const match3 = fullText.match(/3\.\s*(.*?)(?:4\.|5\.)/);
+                const match4 = fullText.match(/4\.\s*(.*?)(?:5\.|6\.)/);
+                const match5 = fullText.match(/5\.\s*(.*?)(?:6\.|7\.)/);
 
-                const pMed = fullText.match(/ราคากลาง\s*(.*?)\s*(?:รายชื่อ|6\.|ผู้ได้รับ|7\.)/);
-                let medianPrice = pMed ? pMed[1].trim() : '';
+                if (match3) {
+                    let raw = match3[1].trim();
+                    let clean = raw.replace(/^[\s\S]{0,15}โครงการ\s*/, '');
+                    projName = clean.length > 3 ? clean : raw;
+                }
+                if (match4) {
+                    let raw = match4[1].trim();
+                    let clean = raw.replace(/^[\s\S]{0,15}ประมาณ\s*/, '');
+                    budget = clean.length > 1 ? clean : raw;
+                }
+                if (match5) {
+                    let raw = match5[1].trim();
+                    let clean = raw.replace(/^[\s\S]{0,15}กลาง\s*/, '');
+                    medianPrice = clean.length > 1 ? clean : raw;
+                }
+
+                // If number-based fails, fallback to permissive text-based Regex
+                if (!projName) {
+                    const pProj = fullText.match(/ชื่อโครงการ\s*(.*?)\s*(?:งบประมาณ|4\.|ราคากลาง)/);
+                    if (pProj) projName = pProj[1].trim();
+                }
+                if (!budget) {
+                    const pBudg = fullText.match(/งบประมาณ\s*(.*?)\s*(?:ราคากลาง|5\.|รายชื่อผู้เสนอ|6\.)/);
+                    if (pBudg) budget = pBudg[1].trim();
+                }
+                if (!medianPrice) {
+                    const pMed = fullText.match(/ราคากลาง\s*(.*?)\s*(?:รายชื่อ|6\.|ผู้ได้รับ|7\.)/);
+                    if (pMed) medianPrice = pMed[1].trim();
+                }
 
                 let method = '';
                 const pMethod = projName.match(/วิธี([ก-๙a-zA-Z]+)/);
