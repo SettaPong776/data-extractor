@@ -137,8 +137,8 @@ class WordExtractor {
 
     /**
      * Smart e-GP Extractor for DOCX files (Multi-page)
-     * Splits document by repeating e-GP form patterns
-     * 1 form = 1 row (143 pages = 143 rows)
+     * Scans ALL paragraphs and tables sequentially
+     * Splits forms by detecting repeating "1." section pattern
      */
     async extractEGP(file, onProgress) {
         if (onProgress) onProgress(1, 3);
@@ -152,69 +152,58 @@ class WordExtractor {
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
 
-        // Collect ALL elements in order (paragraphs and tables)
-        const allElements = doc.body.children;
-        const elements = [];
-        for (let i = 0; i < allElements.length; i++) {
-            elements.push(allElements[i]);
+        // Collect ALL elements in document order using TreeWalker
+        const items = []; // { type: 'text'|'table', content: string|parsedTable }
+        const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT);
+        const visited = new Set();
+
+        let node;
+        while (node = walker.nextNode()) {
+            if (visited.has(node)) continue;
+
+            if (node.tagName === 'TABLE') {
+                visited.add(node);
+                // Mark all children as visited
+                node.querySelectorAll('*').forEach(c => visited.add(c));
+                const td = this._parseHTMLTable(node);
+                if (td && td.rows.length > 0) {
+                    items.push({ type: 'table', content: td });
+                }
+            } else if (node.tagName === 'P') {
+                visited.add(node);
+                const t = node.textContent.trim();
+                if (t) items.push({ type: 'text', content: t });
+            }
         }
 
-        // Split into forms by detecting "ข้อมูลสาระสำคัญ" or "1." pattern
+        // Split items into forms by detecting section "1." pattern
         const forms = [];
         let currentForm = [];
 
-        for (const el of elements) {
-            const text = el.textContent.trim();
+        for (const item of items) {
+            if (item.type === 'text') {
+                const t = item.content;
+                // Detect form boundary: "1. หน่วยงาน" or title "ข้อมูลสาระสำคัญ"
+                const isSection1 = /^1\s*\./.test(t);
+                const isTitle = t.includes('สาระสำคัญ') || t.includes('สาระส');
 
-            // Detect start of new form
-            const isFormStart = text.includes('สาระสำคัญ') ||
-                text.includes('สาระส') ||
-                (text.match(/^1\s*\./) && text.length < 200 && (text.includes('หน่วย') || text.includes('งาน')));
-
-            if (isFormStart && currentForm.length > 0) {
-                forms.push(currentForm);
-                currentForm = [];
+                if ((isSection1 || isTitle) && currentForm.length > 2) {
+                    forms.push(currentForm);
+                    currentForm = [];
+                }
             }
-            currentForm.push(el);
+            currentForm.push(item);
         }
         if (currentForm.length > 0) forms.push(currentForm);
 
-        // If no forms detected, treat entire document as 1 form
-        if (forms.length === 0) forms.push(elements);
-
-        // Process each form into a row
+        // Process each form
         const egpRows = [];
 
-        for (let fi = 0; fi < forms.length; fi++) {
-            const formEls = forms[fi];
+        for (const form of forms) {
+            const paragraphs = form.filter(i => i.type === 'text').map(i => i.content);
+            const tables = form.filter(i => i.type === 'table').map(i => i.content);
 
-            // Separate paragraphs and tables
-            const paragraphs = [];
-            const tables = [];
-
-            for (const el of formEls) {
-                if (el.tagName === 'TABLE') {
-                    const td = this._parseHTMLTable(el);
-                    if (td && td.rows.length > 0) tables.push(td);
-                } else if (el.tagName === 'P') {
-                    const t = el.textContent.trim();
-                    if (t) paragraphs.push(t);
-                } else {
-                    // Might contain nested p/table
-                    const ps = el.querySelectorAll('p');
-                    ps.forEach(p => {
-                        const t = p.textContent.trim();
-                        if (t) paragraphs.push(t);
-                    });
-                    const ts = el.querySelectorAll('table');
-                    ts.forEach(table => {
-                        const td = this._parseHTMLTable(table);
-                        if (td && td.rows.length > 0) tables.push(td);
-                    });
-                }
-            }
-
-            // Parse sections from paragraphs
+            // Parse sections
             const sections = {};
             let currentSection = 0;
 
@@ -224,7 +213,7 @@ class WordExtractor {
                     const num = parseInt(m[1]);
                     if (num >= 1 && num <= 7) {
                         currentSection = num;
-                        sections[currentSection] = line.replace(/^\d\s*\.\s*/, '').trim();
+                        sections[num] = line.replace(/^\d\s*\.\s*/, '').trim();
                         continue;
                     }
                 }
@@ -234,10 +223,12 @@ class WordExtractor {
             }
             for (const k in sections) sections[k] = (sections[k] || '').trim();
 
+            // Skip if no meaningful sections found (likely a title-only block)
+            if (!sections[3] && !sections[4] && tables.length === 0) continue;
+
             // Section 3: Project Name (Yellow)
             let projName = sections[3] || '';
             projName = projName.replace(/^.*?โครงการ\s*/, '');
-
             let method = '';
             const mm = projName.match(/\s*โดยวิธี(.*?)$/);
             if (mm) {
@@ -265,7 +256,7 @@ class WordExtractor {
                 if (bidders.length > 0) biddersStr = bidders.join('\n');
             }
 
-            // Table 7: Winners (Blue + Grey + Pink + Red)
+            // Table 7: Winners
             let winnersStr = '-';
             let reason = '';
             let contractId = '';
@@ -280,7 +271,6 @@ class WordExtractor {
 
                     const nameCol = r.findIndex(c => /บริษัท|ห้าง|ร้าน|สหกรณ์/.test(c));
                     const name = nameCol >= 0 ? r[nameCol] : (r.length > 2 ? r[2] : '');
-
                     const priceCol = r.findIndex(c => /^[\d,]+\.\d{2}$/.test(c.trim()));
                     const price = priceCol >= 0 ? r[priceCol] : '';
 
@@ -289,43 +279,30 @@ class WordExtractor {
 
                     const eGpMatch = rowStr.match(/(6\d{11})/);
                     contractId = eGpMatch ? eGpMatch[1] : '';
-
                     const dateMatch = rowStr.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
                     contractDate = dateMatch ? dateMatch[1] : '';
                 }
             }
 
-            // Only push if we found meaningful data
-            if (projName || budget || tables.length > 0) {
-                egpRows.push([
-                    egpRows.length + 1,
-                    projName || '(ไม่พบชื่อโครงการ)',
-                    budget,
-                    medianPrice,
-                    method,
-                    biddersStr,
-                    winnersStr,
-                    reason,
-                    contractId,
-                    contractDate
-                ]);
-            }
+            egpRows.push([
+                egpRows.length + 1,
+                projName || '(ไม่พบชื่อโครงการ)',
+                budget, medianPrice, method,
+                biddersStr, winnersStr, reason,
+                contractId, contractDate
+            ]);
         }
 
         if (onProgress) onProgress(3, 3);
 
         return [{
             headers: [
-                "ลำดับที่",
-                "งานที่จัดซื้อหรือจัดจ้าง",
-                "วงเงินที่จะซื้อหรือจ้าง",
-                "ราคากลาง",
-                "วิธีซื้อหรือจ้าง",
+                "ลำดับที่", "งานที่จัดซื้อหรือจัดจ้าง",
+                "วงเงินที่จะซื้อหรือจ้าง", "ราคากลาง", "วิธีซื้อหรือจ้าง",
                 "รายชื่อผู้เสนอราคาและราคาที่เสนอ",
                 "ผู้ได้รับการคัดเลือกและราคาที่ตกลงซื้อหรือจ้าง",
                 "เหตุผลที่คัดเลือกโดยสรุป",
-                "เลขที่และวันที่ของสัญญาหรือข้อตกลง",
-                ""
+                "เลขที่และวันที่ของสัญญาหรือข้อตกลง", ""
             ],
             rows: egpRows,
             columnCount: 10,
