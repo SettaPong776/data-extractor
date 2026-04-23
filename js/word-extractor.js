@@ -306,12 +306,14 @@ class WordExtractor {
     }
 
     /**
-     * Strip HTML tags and return plain text
+     * Strip HTML tags and return plain text, preserving paragraph/br newlines
      */
     _htmlToText(html) {
         if (!html) return '';
+        // Replace closing block tags with newlines so textContent doesn't mush text together
+        const withNewlines = html.replace(/<\/p>|<br\s*\/?>|<\/div>|<\/li>/gi, '\n');
         const tmp = document.createElement('div');
-        tmp.innerHTML = html;
+        tmp.innerHTML = withNewlines;
         return tmp.textContent || tmp.innerText || '';
     }
 }
