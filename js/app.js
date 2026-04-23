@@ -51,6 +51,8 @@
         templateSettings: $('#templateSettings'),
         exportTitle: $('#exportTitle'),
         exportSubtitle: $('#exportSubtitle'),
+        startDate: $('#startDate'),
+        endDate: $('#endDate'),
     };
 
     // ===== INITIALIZATION =====
@@ -411,6 +413,36 @@
     }
 
     function setupExport() {
+        // Auto-update subtitle from date pickers
+        function updateSubtitle() {
+            const thaiMonths = ['', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.', 'ม.ค.']; // Fix month array, Jan is index 1 or 12?
+            // Actually new Date().getMonth() returns 0 for Jan, 1 for Feb
+            const thaiMonthsReal = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+            
+            const formatThai = (dateStr) => {
+                if (!dateStr) return '';
+                const d = new Date(dateStr);
+                if (isNaN(d)) return '';
+                return `${d.getDate()} ${thaiMonthsReal[d.getMonth()]} ${d.getFullYear() + 543}`;
+            };
+
+            const start = formatThai(els.startDate.value);
+            const end = formatThai(els.endDate.value);
+
+            if (start && end) {
+                els.exportSubtitle.value = `วันที่ ${start} ถึง วันที่ ${end}`;
+            } else if (start) {
+                els.exportSubtitle.value = `ตั้งแต่วันที่ ${start}`;
+            } else if (end) {
+                els.exportSubtitle.value = `ถึงวันที่ ${end}`;
+            }
+        }
+
+        if (els.startDate && els.endDate) {
+            els.startDate.addEventListener('change', updateSubtitle);
+            els.endDate.addEventListener('change', updateSubtitle);
+        }
+
         $('#btnExport').addEventListener('click', () => {
             try {
                 const table = state.tables[state.activeTableIndex];

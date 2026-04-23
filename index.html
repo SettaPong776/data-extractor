@@ -66,7 +66,7 @@
                 <div style="text-align: center; margin-top: 1.5rem;">
                     <a href="https://www.ilovepdf.com/th/pdf_to_word" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline" style="color: var(--accent-light); border-color: rgba(255,255,255,0.2);">
                         <span class="material-icons-round" style="font-size: 1.1rem;">transform</span>
-                        มีไฟล์ PDF? แปลงเป็น DOCX ที่นี่ (ฟรี)
+                        PDF แปลงเป็น DOCX ที่นี่ 
                     </a>
                 </div>
 
@@ -186,8 +186,14 @@
                         <input type="text" id="exportTitle" class="text-input" value="มหาวิทยาลัยราชภัฏเลย" placeholder="เช่น มหาวิทยาลัยราชภัฏเลย">
                     </div>
                     <div class="input-group">
-                        <label for="exportSubtitle">ช่วงเวลา</label>
-                        <input type="text" id="exportSubtitle" class="text-input" value="วันที่ 1 กุมภาพันธ์ พ.ศ.2569 ถึง วันที่ 29 กุมภาพันธ์ พ.ศ.2569" placeholder="เช่น วันที่ 1 กุมภาพันธ์ พ.ศ.2569 ถึง วันที่ 29 กุมภาพันธ์ พ.ศ.2569">
+                        <label>ช่วงเวลา</label>
+                        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px;">
+                            <span style="color: var(--text-muted); font-size: 0.9rem;">จาก</span>
+                            <input type="date" id="startDate" class="text-input" style="flex: 1; padding: 8px;">
+                            <span style="color: var(--text-muted); font-size: 0.9rem;">ถึง</span>
+                            <input type="date" id="endDate" class="text-input" style="flex: 1; padding: 8px;">
+                        </div>
+                        <input type="text" id="exportSubtitle" class="text-input" value="วันที่ 1 ก.พ. 2569 ถึง วันที่ 29 ก.พ. 2569" placeholder="สามารถแก้ไขข้อความนี้ได้" style="font-size: 0.9rem; background: rgba(0,0,0,0.2);">
                     </div>
                 </div>
 
@@ -224,10 +230,10 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
-    <script src="js/pdf-extractor.js?v=30"></script>
-    <script src="js/word-extractor.js?v=30"></script>
-    <script src="js/column-mapper.js?v=30"></script>
-    <script src="js/excel-exporter.js?v=30"></script>
-    <script src="js/app.js?v=30"></script>
+    <script src="js/pdf-extractor.js?v=31"></script>
+    <script src="js/word-extractor.js?v=31"></script>
+    <script src="js/column-mapper.js?v=31"></script>
+    <script src="js/excel-exporter.js?v=31"></script>
+    <script src="js/app.js?v=31"></script>
 </body>
 </html>
