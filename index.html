@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Extractor — แยกข้อมูลตารางจาก PDF/Word</title>
+    <meta name="description" content="โปรแกรมแยกข้อมูลตารางจากไฟล์ PDF และ Word แล้วส่งออกเป็น Excel">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+    <!-- ===== HEADER ===== -->
+    <header class="app-header">
+        <div class="header-inner">
+            <div class="logo">
+                <span class="logo-icon material-icons-round">table_chart</span>
+                <h1>Data Extractor</h1>
+            </div>
+            <p class="tagline">แยกข้อมูลตารางจาก PDF / Word → Excel</p>
+        </div>
+    </header>
+
+    <!-- ===== STEP INDICATOR ===== -->
+    <nav class="step-indicator" id="stepIndicator">
+        <div class="step-line"><div class="step-line-fill" id="stepLineFill"></div></div>
+        <div class="step active" data-step="1">
+            <div class="step-circle">1</div>
+            <span>อัปโหลด</span>
+        </div>
+        <div class="step" data-step="2">
+            <div class="step-circle">2</div>
+            <span>ตรวจสอบข้อมูล</span>
+        </div>
+        <div class="step" data-step="3">
+            <div class="step-circle">3</div>
+            <span>จัดเรียงคอลัมน์</span>
+        </div>
+        <div class="step" data-step="4">
+            <div class="step-circle">4</div>
+            <span>ส่งออก Excel</span>
+        </div>
+    </nav>
+
+    <!-- ===== MAIN CONTENT ===== -->
+    <main class="main-content">
+
+        <!-- STEP 1: Upload -->
+        <section class="step-panel active" id="step1">
+            <div class="card upload-card">
+                <div class="upload-zone" id="uploadZone">
+                    <div class="upload-icon-wrapper">
+                        <span class="material-icons-round upload-icon">cloud_upload</span>
+                    </div>
+                    <h2>ลากไฟล์มาวางที่นี่</h2>
+                    <p>หรือคลิกเพื่อเลือกไฟล์</p>
+                    <div class="upload-formats">
+                        <span class="badge badge-pdf">PDF</span>
+                        <span class="badge badge-word">DOCX</span>
+                    </div>
+                    <input type="file" id="fileInput" accept=".pdf,.docx" hidden>
+                </div>
+                <div class="file-info" id="fileInfo" style="display:none">
+                    <span class="material-icons-round">description</span>
+                    <div class="file-details">
+                        <strong id="fileName"></strong>
+                        <small id="fileSize"></small>
+                    </div>
+                    <button class="btn btn-sm btn-ghost" id="removeFile">
+                        <span class="material-icons-round">close</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Processing Progress -->
+            <div class="card progress-card" id="progressCard" style="display:none">
+                <div class="progress-header">
+                    <span class="material-icons-round spin">settings</span>
+                    <span id="progressText">กำลังวิเคราะห์เอกสาร...</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <small id="progressDetail" class="text-muted">เตรียมพร้อม...</small>
+            </div>
+        </section>
+
+        <!-- STEP 2: Preview -->
+        <section class="step-panel" id="step2">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h2><span class="material-icons-round">visibility</span> ข้อมูลที่สกัดได้</h2>
+                        <small class="text-muted" id="extractionSummary"></small>
+                    </div>
+                    <div class="card-actions">
+                        <button class="btn btn-ghost" id="btnBackToUpload">
+                            <span class="material-icons-round">arrow_back</span> ย้อนกลับ
+                        </button>
+                        <button class="btn btn-primary" id="btnGoToMapping">
+                            ถัดไป <span class="material-icons-round">arrow_forward</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Table selector if multiple tables -->
+                <div class="table-selector" id="tableSelector" style="display:none">
+                    <label>เลือกตาราง:</label>
+                    <select id="tableSelect" class="select-input"></select>
+                </div>
+
+                <div class="table-wrapper" id="previewTableWrapper">
+                    <table class="data-table" id="previewTable">
+                        <thead id="previewHead"></thead>
+                        <tbody id="previewBody"></tbody>
+                    </table>
+                </div>
+
+                <div class="pagination" id="pagination"></div>
+            </div>
+        </section>
+
+        <!-- STEP 3: Column Mapping -->
+        <section class="step-panel" id="step3">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h2><span class="material-icons-round">swap_horiz</span> จัดเรียงคอลัมน์</h2>
+                        <small class="text-muted">ลากเพื่อจัดเรียง, แก้ไขชื่อ, หรือซ่อนคอลัมน์ที่ไม่ต้องการ</small>
+                    </div>
+                    <div class="card-actions">
+                        <button class="btn btn-ghost" id="btnBackToPreview">
+                            <span class="material-icons-round">arrow_back</span> ย้อนกลับ
+                        </button>
+                        <button class="btn btn-primary" id="btnGoToExport">
+                            ถัดไป <span class="material-icons-round">arrow_forward</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="mapper-container" id="mapperContainer">
+                    <div class="mapper-columns" id="mapperColumns"></div>
+                </div>
+
+                <h3 class="mt-4"><span class="material-icons-round">preview</span> ตัวอย่างผลลัพธ์</h3>
+                <div class="table-wrapper">
+                    <table class="data-table" id="mappedPreviewTable">
+                        <thead id="mappedPreviewHead"></thead>
+                        <tbody id="mappedPreviewBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- STEP 4: Export -->
+        <section class="step-panel" id="step4">
+            <div class="card export-card">
+                <div class="export-icon-wrapper">
+                    <span class="material-icons-round">download_done</span>
+                </div>
+                <h2>พร้อมส่งออก!</h2>
+                <p class="text-muted" id="exportSummary"></p>
+
+                <div class="export-options">
+                    <div class="input-group">
+                        <label for="exportFilename">ชื่อไฟล์</label>
+                        <input type="text" id="exportFilename" class="text-input" value="extracted_data" placeholder="ชื่อไฟล์">
+                    </div>
+                </div>
+
+                <button class="btn btn-lg btn-success" id="btnExport">
+                    <span class="material-icons-round">file_download</span>
+                    ดาวน์โหลด Excel (.xlsx)
+                </button>
+
+                <div class="export-actions-row">
+                    <button class="btn btn-ghost" id="btnBackToMapping">
+                        <span class="material-icons-round">arrow_back</span> ย้อนกลับแก้ไข
+                    </button>
+                    <button class="btn btn-ghost" id="btnStartOver">
+                        <span class="material-icons-round">refresh</span> เริ่มใหม่
+                    </button>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Toast Notification -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Scripts (CDN) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+    <script src="js/pdf-extractor.js"></script>
+    <script src="js/word-extractor.js"></script>
+    <script src="js/column-mapper.js"></script>
+    <script src="js/excel-exporter.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
