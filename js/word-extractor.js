@@ -450,10 +450,12 @@ class WordExtractor {
         console.log(`[Non-eGP DOCX] Extracting from ${tables.length} tables`);
         const egpRows = [];
         let seq = 1;
+        let lastCompanyName = "ไม่ระบุ";
 
         for (const table of tables) {
             for (const r of table.rows) {
-                if (r.length < 5) continue;
+                // If less than 3 columns, it's probably a fully merged separator row
+                if (r.length < 3) continue;
                 
                 const rowStr = r.join(' ');
                 // Skip header rows (accounting for TH Sarabun garbled characters)
@@ -463,10 +465,16 @@ class WordExtractor {
                 if (r[0] && /^\s*\(\s*[1-9]\s*\)\s*$/.test(r[0])) continue;
                 if (r[1] && /^\s*\(\s*[1-9]\s*\)\s*$/.test(r[1])) continue;
                 
-                // Usually data rows have a valid company name in column 2
-                if (!r[1] || r[1].trim() === '') continue;
+                let name = r[1] ? r[1].trim() : '';
+                
+                // If name is empty, it might be a vertically merged cell, reuse the last known name
+                if (!name) {
+                    if (!r[2] || r[2].trim() === '') continue; // Skip if item is also empty
+                    name = lastCompanyName;
+                } else {
+                    lastCompanyName = name;
+                }
 
-                const name = r[1].trim();
                 const item = r[2] ? r[2].trim() : '';
                 let amount = r[3] ? r[3].trim() : '';
                 let dateStr = '';
