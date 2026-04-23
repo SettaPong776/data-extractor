@@ -123,7 +123,8 @@
                 els.progressDetail.textContent = `หน้า ${current} / ${total}`;
             };
 
-            const extractMode = document.querySelector('input[name="extractMode"]:checked').value;
+            // Default to 'egp' mode since the UI was removed
+            const extractMode = 'egp';
 
             if (ext === 'pdf') {
                 if (extractMode === 'egp') {
