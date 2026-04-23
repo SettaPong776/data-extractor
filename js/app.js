@@ -397,17 +397,25 @@
                     subtitle: els.exportSubtitle.value.trim()
                 } : null;
 
-                // If multiple tables exist, export all
+                // Always merge all tables into 1 sheet
                 if (state.tables.length > 1) {
-                    const allMapped = state.tables.map((t, i) => {
-                        // Use same mapping if column counts match, otherwise use original headers
+                    let allRows = [];
+                    let finalHeaders = mapped.headers;
+                    
+                    state.tables.forEach((t) => {
                         if (t.columnCount === table.columnCount) {
                             const m = columnMapper.applyMapping(t.rows);
-                            return { name: `Table ${i + 1}`, headers: m.headers, rows: m.rows };
+                            allRows.push(...m.rows);
+                        } else {
+                            allRows.push(...t.rows);
                         }
-                        return { name: `Table ${i + 1}`, headers: t.headers, rows: t.rows };
                     });
-                    excelExporter.exportMultiple(allMapped, filename, templateConfig);
+                    
+                    excelExporter.export(
+                        { headers: finalHeaders, rows: allRows },
+                        filename,
+                        templateConfig
+                    );
                 } else {
                     excelExporter.export(mapped, filename, templateConfig);
                 }
