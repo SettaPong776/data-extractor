@@ -137,8 +137,8 @@ class WordExtractor {
 
     /**
      * Smart e-GP Extractor for DOCX files (Multi-page)
-     * Scans ALL paragraphs and tables sequentially
-     * Splits forms by detecting repeating "1." section pattern
+     * Strategy: Each form has exactly 2 tables (Table 6 + Table 7)
+     * So we pair tables and find text sections between them
      */
     async extractEGP(file, onProgress) {
         if (onProgress) onProgress(1, 3);
@@ -152,62 +152,61 @@ class WordExtractor {
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
 
-        // Collect ALL elements in document order using TreeWalker
-        const items = []; // { type: 'text'|'table', content: string|parsedTable }
-        const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT);
-        const visited = new Set();
+        // Collect ALL paragraphs and tables in document order
+        const allParagraphs = [];
+        const allTables = [];
 
-        let node;
-        while (node = walker.nextNode()) {
-            if (visited.has(node)) continue;
+        // Use querySelectorAll to get all p and table in document order
+        const allElements = doc.querySelectorAll('p, table');
+        const orderedItems = []; // { type, index, element }
 
-            if (node.tagName === 'TABLE') {
-                visited.add(node);
-                // Mark all children as visited
-                node.querySelectorAll('*').forEach(c => visited.add(c));
-                const td = this._parseHTMLTable(node);
-                if (td && td.rows.length > 0) {
-                    items.push({ type: 'table', content: td });
+        allElements.forEach((el, i) => {
+            // Skip nested tables (tables inside tables)
+            if (el.tagName === 'TABLE' && el.closest('table') !== el) return;
+            // Skip paragraphs inside tables
+            if (el.tagName === 'P' && el.closest('table')) return;
+
+            if (el.tagName === 'TABLE') {
+                const td = this._parseHTMLTable(el);
+                if (td && (td.rows.length > 0 || td.headers.length > 0)) {
+                    orderedItems.push({ type: 'table', data: td, order: i });
+                    allTables.push({ data: td, order: i });
                 }
-            } else if (node.tagName === 'P') {
-                visited.add(node);
-                const t = node.textContent.trim();
-                if (t) items.push({ type: 'text', content: t });
-            }
-        }
-
-        // Split items into forms by detecting section "1." pattern
-        const forms = [];
-        let currentForm = [];
-
-        for (const item of items) {
-            if (item.type === 'text') {
-                const t = item.content;
-                // Detect form boundary: "1. หน่วยงาน" or title "ข้อมูลสาระสำคัญ"
-                const isSection1 = /^1\s*\./.test(t);
-                const isTitle = t.includes('สาระสำคัญ') || t.includes('สาระส');
-
-                if ((isSection1 || isTitle) && currentForm.length > 2) {
-                    forms.push(currentForm);
-                    currentForm = [];
+            } else {
+                const t = el.textContent.trim();
+                if (t) {
+                    orderedItems.push({ type: 'text', data: t, order: i });
+                    allParagraphs.push({ data: t, order: i });
                 }
             }
-            currentForm.push(item);
-        }
-        if (currentForm.length > 0) forms.push(currentForm);
+        });
 
-        // Process each form
+        console.log(`[e-GP DOCX] Found ${allParagraphs.length} paragraphs, ${allTables.length} tables`);
+
+        // Strategy: Pair tables as (table6, table7) for each form
+        // Each form has 2 tables, so forms = allTables.length / 2
+        const numForms = Math.floor(allTables.length / 2);
+        console.log(`[e-GP DOCX] Detected ${numForms} forms (${allTables.length} tables / 2)`);
+
         const egpRows = [];
 
-        for (const form of forms) {
-            const paragraphs = form.filter(i => i.type === 'text').map(i => i.content);
-            const tables = form.filter(i => i.type === 'table').map(i => i.content);
+        for (let fi = 0; fi < numForms; fi++) {
+            const t6 = allTables[fi * 2];     // Table 6 (bidders)
+            const t7 = allTables[fi * 2 + 1]; // Table 7 (winners)
 
-            // Parse sections
+            // Find text paragraphs BEFORE table 6 (between previous table7 and current table6)
+            const prevTableOrder = fi > 0 ? allTables[fi * 2 - 1].order : -1;
+            const currentT6Order = t6.order;
+
+            const sectionTexts = allParagraphs
+                .filter(p => p.order > prevTableOrder && p.order < currentT6Order)
+                .map(p => p.data);
+
+            // Parse sections from these paragraphs
             const sections = {};
             let currentSection = 0;
 
-            for (const line of paragraphs) {
+            for (const line of sectionTexts) {
                 const m = line.match(/^(\d)\s*\./);
                 if (m) {
                     const num = parseInt(m[1]);
@@ -222,9 +221,6 @@ class WordExtractor {
                 }
             }
             for (const k in sections) sections[k] = (sections[k] || '').trim();
-
-            // Skip if no meaningful sections found (likely a title-only block)
-            if (!sections[3] && !sections[4] && tables.length === 0) continue;
 
             // Section 3: Project Name (Yellow)
             let projName = sections[3] || '';
@@ -246,9 +242,8 @@ class WordExtractor {
 
             // Table 6: Bidders (Light Blue)
             let biddersStr = '-';
-            const table6 = tables.find(t => t.headers.length >= 3 && t.headers.length <= 6);
-            if (table6) {
-                const bidders = table6.rows.map(r => {
+            if (t6.data && t6.data.rows.length > 0) {
+                const bidders = t6.data.rows.map(r => {
                     const name = r.length >= 2 ? r[r.length - 2] : '';
                     const price = r.length >= 1 ? r[r.length - 1] : '';
                     return `${name}/ ${price} บาท`.trim();
@@ -262,9 +257,8 @@ class WordExtractor {
             let contractId = '';
             let contractDate = '';
 
-            const table7 = tables.find(t => t.headers.length >= 7);
-            if (table7) {
-                const dataRows = table7.rows.filter(r => r.some(c => /\d{10,}/.test(c)));
+            if (t7.data && t7.data.rows.length > 0) {
+                const dataRows = t7.data.rows.filter(r => r.some(c => /\d{10,}/.test(c)));
                 if (dataRows.length > 0) {
                     const r = dataRows[0];
                     const rowStr = r.join(' ');
@@ -294,6 +288,7 @@ class WordExtractor {
         }
 
         if (onProgress) onProgress(3, 3);
+        console.log(`[e-GP DOCX] Extracted ${egpRows.length} rows`);
 
         return [{
             headers: [
