@@ -305,9 +305,10 @@ class PDFExtractor {
                 let budget = '';
                 let medianPrice = '';
 
-                const match3 = fullText.match(/3\.\s*(.*?)(?:4\.|5\.)/);
-                const match4 = fullText.match(/4\.\s*(.*?)(?:5\.|6\.)/);
-                const match5 = fullText.match(/5\.\s*(.*?)(?:6\.|7\.)/);
+                // Use \s* around dots to handle weird PDF.js spacing
+                const match3 = fullText.match(/3\s*\.\s*(.*?)(?:4\s*\.|5\s*\.)/);
+                const match4 = fullText.match(/4\s*\.\s*(.*?)(?:5\s*\.|6\s*\.)/);
+                const match5 = fullText.match(/5\s*\.\s*(.*?)(?:6\s*\.|7\s*\.)/);
 
                 if (match3) {
                     let raw = match3[1].trim();
@@ -354,17 +355,18 @@ class PDFExtractor {
                 // Extract Tables to find Bidders and Winners
                 const tables = this._extractTablesFromPage(items, pageNum);
                 
-                // Find Table 6 and 7
-                let table6 = tables.find(t => t.headers.join(' ').includes('ราคาที่เสนอ') || t.headers.join(' ').includes('รายชื่อผู้เสนอราคา'));
-                if (!table6) table6 = tables.find(t => t.rows.length > 0 && t.rows[0].join(' ').includes('รายชื่อผู้เสนอราคา'));
-
-                let table7 = tables.find(t => t.headers.join(' ').includes('เหตุผลที่คัดเลือก') || t.headers.join(' ').includes('ชื่อผู้ขาย'));
-                if (!table7) table7 = tables.find(t => t.rows.length > 0 && t.rows[0].join(' ').includes('เหตุผลที่คัดเลือก'));
+                // Find Table 6 and 7 using column counts (Immune to garbled Thai fonts)
+                let table6 = tables.find(t => t.columnCount >= 4 && t.columnCount <= 6);
+                let table7 = tables.find(t => t.columnCount >= 7);
+                
+                if (!table6 && tables.length > 0) table6 = tables[0];
+                if (!table7 && tables.length > 1) table7 = tables[1];
 
                 // Format Table 6 (Bidders)
                 let bidders = [];
                 if (table6) {
-                    const dataRows = table6.rows.filter(r => !r.join(' ').includes('รายชื่อผู้เสนอราคา') && r.join('').trim().length > 0);
+                    // Filter data rows by checking for 13-digit Tax ID
+                    const dataRows = table6.rows.filter(r => r.some(cell => /\d{13}/.test(cell)));
                     bidders = dataRows.map(r => {
                         const name = r.length >= 2 ? r[r.length - 2] : '';
                         const price = r.length >= 1 ? r[r.length - 1] : r.join(' ');
@@ -380,7 +382,8 @@ class PDFExtractor {
                 let contractDate = '';
                 
                 if (table7) {
-                    const dataRows = table7.rows.filter(r => !r.join(' ').includes('เหตุผลที่คัดเลือก') && r.join('').trim().length > 0);
+                    // Filter data rows by checking for 13-digit Tax ID
+                    const dataRows = table7.rows.filter(r => r.some(cell => /\d{13}/.test(cell)));
                     if (dataRows.length > 0) {
                         const r = dataRows[0]; // Take first winner
                         const name = r.length > 2 ? r[2] : '';
