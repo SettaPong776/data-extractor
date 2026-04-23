@@ -198,39 +198,26 @@ class WordExtractor {
             // Text before table 6 = textBetweenTables[fi * 2]
             // Text between table 6 and table 7 = textBetweenTables[fi * 2 + 1]
             const sectionText = textBetweenTables[fi * 2] || '';
-            const lines = sectionText.split('\n').map(l => l.trim()).filter(l => l);
-
-            // Parse sections from these paragraphs (Fallback if regex fails)
-            const sections = {};
-            let currentSection = 0;
-
-            for (const line of lines) {
-                const m = line.match(/^(\d)\s*\./);
-                if (m) {
-                    const num = parseInt(m[1]);
-                    if (num >= 1 && num <= 7) {
-                        currentSection = num;
-                        sections[num] = line.replace(/^\d\s*\.\s*/, '').trim();
-                        continue;
-                    }
-                }
-                if (currentSection >= 1 && currentSection <= 5) {
-                    sections[currentSection] = (sections[currentSection] || '') + ' ' + line;
-                }
-            }
-            for (const k in sections) sections[k] = (sections[k] || '').trim();
-
-            const fullText = lines.join(' ');
+            const fullText = sectionText.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
             if (fi === 0) console.log(`[e-GP DOCX] Form 1 text:`, fullText.substring(0, 200) + '...');
 
-            // Section 3: Project Name (Yellow)
-            let projName = '';
-            const projMatch = fullText.match(/โครงการ\s*(.*?)(?=\s*\d\.\s*(?:งบประมาณ|วงเงิน)|(?:งบประมาณ|วงเงิน)\s*[\d,]+|$)/);
-            if (projMatch) {
-                projName = projMatch[1].trim();
-            } else {
-                projName = sections[3] ? sections[3].replace(/^.*?โครงการ\s*/, '') : '';
+            // Extract by splitting the full text into numbered sections
+            // This correctly handles cases where mammoth.js merges everything into a single line
+            const sectionChunks = fullText.split(/(?=(?:^|\s)[1-7]\s*\.\s*)/);
+            
+            const sections = {};
+            for (const chunk of sectionChunks) {
+                const m = chunk.trim().match(/^([1-7])\s*\.\s*(.*)/s);
+                if (m) {
+                    sections[m[1]] = m[2].trim();
+                }
             }
+
+            if (fi === 0) console.log(`[e-GP DOCX] Form 1 sections:`, JSON.stringify(sections));
+
+            // Section 3: Project Name (Yellow)
+            let projName = sections[3] || '';
+            projName = projName.replace(/^.*?โครงการ\s*/, '').trim();
             
             let method = '';
             const mm = projName.match(/\s*โดยวิธี(.*?)$/);
@@ -238,6 +225,9 @@ class WordExtractor {
                 method = mm[1].trim();
                 projName = projName.replace(/\s*โดยวิธี.*$/, '').trim();
             }
+            
+            // Remove "ซื้อ" or "จ้าง" at the beginning to match user's exact example
+            projName = projName.replace(/^(ซื้อ|จ้าง)\s*/, '').trim();
 
             // Section 4: Budget (Dark Green)
             let budget = '';
