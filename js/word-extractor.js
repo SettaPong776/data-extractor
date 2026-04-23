@@ -293,15 +293,21 @@ class WordExtractor {
                     if (taxIdIndex >= 1) {
                         projName = firstRow[taxIdIndex - 1].trim();
                         projName = projName.replace(/^\d+\s+/, '').trim();
+                    } else if (firstRow.length >= 4) {
+                        // If no tax ID found but we have enough columns, column 1 is usually the project name
+                        const possibleName = firstRow.length >= 5 ? firstRow[1] : firstRow[0];
+                        if (possibleName && !/^\d+$/.test(possibleName)) {
+                            projName = possibleName.replace(/^\d+\s+/, '').trim();
+                        }
                     }
                 }
                 
                 // Case B: Table mashed into a blob
                 if (!projName || projName === '(ไม่พบชื่อโครงการ)') {
-                    if (blob.length > 50) {
-                        let pMatch = blob.match(/ราคาที่เสนอ\s*\d+\s*(.*?)\s*\d{13}/);
+                    if (blob.length > 10) {
+                        let pMatch = blob.match(/ราคาที่เสนอ\s*\d+\s*(.*?)(?=\d{13})/);
                         if (!pMatch) {
-                            pMatch = blob.match(/(?:^\d+\s+|\s+\d+\s+)(\S.*?)\s+\d{13}/);
+                            pMatch = blob.match(/(?:^\d+\s*|\s+\d+\s*)(\S.*?)(?=\d{13})/);
                         }
                         if (pMatch) {
                             projName = pMatch[1].replace(/^\d+\s*/, '').trim();
@@ -321,7 +327,7 @@ class WordExtractor {
             }
             
             // Try from the blob if it's a huge mashed string
-            if (!proposedPrice && blob.length > 50) {
+            if (!proposedPrice && blob.length > 20) {
                 const bidderMatch = blob.match(/\d{13}\s*(.*?)\s*([\d,]+\.\d{2})/);
                 if (bidderMatch) {
                     proposedPrice = bidderMatch[2]; // e.g., "8,198.00"
