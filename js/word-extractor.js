@@ -185,6 +185,16 @@ class WordExtractor {
 
         console.log(`[e-GP DOCX] Found ${allTables.length} tables, ${textBetweenTables.length} text chunks`);
 
+        // Auto-detect Non-eGP table format (e.g., สขร.1)
+        const isNonEGP = allTables.some(t => {
+            const firstFewRowsText = t.rows.slice(0, 3).map(r => r.join(' ')).join(' ');
+            return firstFewRowsText.includes('ชื่อผู้ประกอบการ') && firstFewRowsText.includes('รายการพัสดุ');
+        });
+
+        if (isNonEGP) {
+            return this._extractNonEGP(allTables, onProgress);
+        }
+
         // Strategy: Pair tables as (table6, table7) for each form
         const numForms = Math.floor(allTables.length / 2);
         console.log(`[e-GP DOCX] Detected ${numForms} forms`);
@@ -430,5 +440,100 @@ class WordExtractor {
         const tmp = document.createElement('div');
         tmp.innerHTML = withNewlines;
         return tmp.textContent || tmp.innerText || '';
+    }
+
+    /**
+     * Extract data from Non-eGP summary tables (e.g. สขร.1)
+     */
+    _extractNonEGP(tables, onProgress) {
+        console.log(`[Non-eGP DOCX] Extracting from ${tables.length} tables`);
+        const egpRows = [];
+        let seq = 1;
+
+        for (const table of tables) {
+            for (const r of table.rows) {
+                if (r.length < 5) continue;
+                
+                const rowStr = r.join(' ');
+                // Skip header rows
+                if (/(?:ลำดับ|ผู้ประกอบการ|รายการ|จำนวนเงิน|เอกสาร|เหตุผล)/.test(rowStr)) continue;
+                
+                // Usually data rows have a valid company name in column 2
+                if (!r[1] || r[1].trim() === '') continue;
+
+                const name = r[1].trim();
+                const item = r[2] ? r[2].trim() : '';
+                let amount = r[3] ? r[3].trim() : '';
+                let dateStr = '';
+                let refNo = '';
+                let reason = '';
+
+                // Mammoth might parse as 7 cols or squash date/refno into col 4
+                if (r.length >= 7) {
+                    dateStr = r[4] ? r[4].trim() : '';
+                    refNo = r[5] ? r[5].trim() : '';
+                    reason = r[6] ? r[6].trim() : '';
+                } else if (r.length === 6) {
+                    const str = r[4] ? r[4].trim() : '';
+                    const dMatch = str.match(/(\d{1,2}\s+[ก-ฮ.A-Za-z]+\s+\d{4})/);
+                    if (dMatch) {
+                        dateStr = dMatch[1];
+                        refNo = str.replace(dateStr, '').trim();
+                    } else {
+                        refNo = str;
+                    }
+                    reason = r[5] ? r[5].trim() : '';
+                }
+
+                // Clean up amount format
+                const amtMatch = amount.match(/([\d,]+\.\d{2})/);
+                if (amtMatch) amount = amtMatch[1];
+
+                // Format date if it's DD/MM/YYYY, else keep as is (e.g. 2 ส.ค. 2568)
+                let contractDate = dateStr;
+                const dMatch2 = dateStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+                if (dMatch2) {
+                    const thaiMonthsReal = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+                    const d = parseInt(dMatch2[1], 10);
+                    const m = parseInt(dMatch2[2], 10);
+                    const y = dMatch2[3];
+                    if (m >= 1 && m <= 12) {
+                        contractDate = `${d} ${thaiMonthsReal[m]} ${y}`;
+                    }
+                }
+
+                const biddersStr = `${name}/ ${amount} บาท`.trim();
+
+                egpRows.push([
+                    seq++,
+                    item,            // 2. งานที่จัดซื้อหรือจัดจ้าง
+                    amount,          // 3. วงเงิน
+                    '',              // 4. ราคากลาง (เว้นว่าง)
+                    '',              // 5. วิธีซื้อหรือจ้าง (เว้นว่าง)
+                    biddersStr,      // 6. รายชื่อผู้เสนอราคา
+                    biddersStr,      // 7. ผู้ได้รับการคัดเลือก
+                    reason,          // 8. เหตุผล
+                    refNo,           // 9. เลขที่สัญญา
+                    contractDate     // 10. วันที่ทำสัญญา
+                ]);
+            }
+        }
+
+        if (onProgress) onProgress(3, 3);
+        console.log(`[Non-eGP DOCX] Extracted ${egpRows.length} rows`);
+
+        return [{
+            headers: [
+                "ลำดับที่", "งานที่จัดซื้อหรือจัดจ้าง",
+                "วงเงินที่จะซื้อหรือจ้าง", "ราคากลาง", "วิธีซื้อหรือจ้าง",
+                "รายชื่อผู้เสนอราคาและราคาที่เสนอ",
+                "ผู้ได้รับการคัดเลือกและราคาที่ตกลงซื้อหรือจ้าง",
+                "เหตุผลที่คัดเลือกโดยสรุป",
+                "เลขที่สัญญา/ข้อตกลง", "วันที่ทำสัญญา/ข้อตกลง"
+            ],
+            rows: egpRows,
+            rowCount: egpRows.length,
+            columnCount: 10
+        }];
     }
 }
