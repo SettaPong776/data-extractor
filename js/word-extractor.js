@@ -365,7 +365,17 @@ class WordExtractor {
                     reason = r[r.length - 1] || '';
 
                     const eGpMatch = rowStr.match(/(6\d{11})/);
-                    contractId = eGpMatch ? eGpMatch[1] : '';
+                    
+                    // Try to extract the PO/Contract Number (e.g. 593/2569) which usually follows the e-GP number
+                    const contractMatch = rowStr.match(/6\d{11}\s*([ก-ฮA-Za-z0-9.-]+\/\d{4})/);
+                    if (contractMatch) {
+                        contractId = contractMatch[1];
+                    } else {
+                        // Fallback: look for any pattern like XX/25XX that is not a date
+                        const fallbackMatch = rowStr.match(/(?:^|\s)(?!(?:\d{1,2}\/\d{1,2}\/\d{4}))([ก-ฮA-Za-z0-9.-]+\/\d{4})/);
+                        if (fallbackMatch) contractId = fallbackMatch[1];
+                    }
+                    
                     const dateMatch = rowStr.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
                     contractDate = dateMatch ? dateMatch[1] : '';
                 }
