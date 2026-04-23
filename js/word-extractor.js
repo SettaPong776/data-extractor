@@ -200,7 +200,7 @@ class WordExtractor {
             const sectionText = textBetweenTables[fi * 2] || '';
             const lines = sectionText.split('\n').map(l => l.trim()).filter(l => l);
 
-            // Parse sections from these paragraphs
+            // Parse sections from these paragraphs (Fallback if regex fails)
             const sections = {};
             let currentSection = 0;
 
@@ -220,11 +220,18 @@ class WordExtractor {
             }
             for (const k in sections) sections[k] = (sections[k] || '').trim();
 
-            if (fi === 0) console.log(`[e-GP DOCX] Form 1 sections:`, JSON.stringify(sections));
+            const fullText = lines.join(' ');
+            if (fi === 0) console.log(`[e-GP DOCX] Form 1 text:`, fullText.substring(0, 200) + '...');
 
             // Section 3: Project Name (Yellow)
-            let projName = sections[3] || '';
-            projName = projName.replace(/^.*?โครงการ\s*/, '');
+            let projName = '';
+            const projMatch = fullText.match(/โครงการ\s*(.*?)(?=\s*\d\.\s*(?:งบประมาณ|วงเงิน)|(?:งบประมาณ|วงเงิน)\s*[\d,]+|$)/);
+            if (projMatch) {
+                projName = projMatch[1].trim();
+            } else {
+                projName = sections[3] ? sections[3].replace(/^.*?โครงการ\s*/, '') : '';
+            }
+            
             let method = '';
             const mm = projName.match(/\s*โดยวิธี(.*?)$/);
             if (mm) {
@@ -233,12 +240,24 @@ class WordExtractor {
             }
 
             // Section 4: Budget (Dark Green)
-            let budget = sections[4] || '';
-            budget = budget.replace(/^.*?[มณ]\s+/g, '').replace(/\s*บาท.*$/, '').trim();
+            let budget = '';
+            const budgetMatch = fullText.match(/(?:งบประมาณ|วงเงิน)[^\d]*([\d,]+\.\d{2}|[\d,]+)/);
+            if (budgetMatch) {
+                budget = budgetMatch[1];
+            } else if (sections[4]) {
+                const bMatch = sections[4].match(/[\d,]+\.\d{2}|[\d,]+/);
+                if (bMatch) budget = bMatch[0];
+            }
 
             // Section 5: Median Price (Light Green)
-            let medianPrice = sections[5] || '';
-            medianPrice = medianPrice.replace(/^.*?กลาง\s*/, '').replace(/\s*บาท.*$/, '').trim();
+            let medianPrice = '';
+            const medianMatch = fullText.match(/ราคากลาง[^\d]*([\d,]+\.\d{2}|[\d,]+)/);
+            if (medianMatch) {
+                medianPrice = medianMatch[1];
+            } else if (sections[5]) {
+                const mMatch = sections[5].match(/[\d,]+\.\d{2}|[\d,]+/);
+                if (mMatch) medianPrice = mMatch[0];
+            }
 
             // Table 6: Bidders (Light Blue)
             let biddersStr = '-';
