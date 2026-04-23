@@ -260,4 +260,141 @@ class PDFExtractor {
         merged.push(current);
         return merged;
     }
+
+    /**
+     * Smart e-GP Extractor: Extracts specific fields from Thai e-GP forms
+     * 1 Page = 1 Row
+     */
+    async extractEGP(file, onProgress) {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const totalPages = pdf.numPages;
+        const egpRows = [];
+
+        for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+            if (onProgress) onProgress(pageNum, totalPages);
+
+            try {
+                const page = await pdf.getPage(pageNum);
+                const viewport = page.getViewport({ scale: 1 });
+                const textContent = await page.getTextContent();
+
+                const items = textContent.items
+                    .filter(item => item.str && item.str.trim() !== '')
+                    .map(item => ({
+                        text: item.str.trim(),
+                        x: Math.round(item.transform[4]),
+                        y: Math.round(viewport.height - item.transform[5]),
+                        width: item.width,
+                        height: Math.abs(item.transform[3]) || 12
+                    }));
+
+                if (items.length < this.MIN_ROW_ITEMS) continue;
+                
+                // Sorting for fullText (Reading order: top-bottom, left-right)
+                const sortedItems = [...items].sort((a, b) => {
+                    if (Math.abs(a.y - b.y) <= this.Y_TOLERANCE) {
+                        return a.x - b.x;
+                    }
+                    return a.y - b.y;
+                });
+                const fullText = sortedItems.map(i => i.text).join(' ');
+
+                // Extract Fields using Regex
+                const matchProj = fullText.match(/3\.\s*ชื่อโครงการ\s*(.*?)\s*4\.\s*งบประมาณ/);
+                const matchBudg = fullText.match(/4\.\s*งบประมาณ\s*(.*?)\s*5\.\s*ราคากลาง/);
+                const matchMed = fullText.match(/5\.\s*ราคากลาง\s*(.*?)\s*(?:6\.\s*รายชื่อผู้เสนอราคา|6\.\s*รายชื่อ|$)/);
+
+                let projName = matchProj ? matchProj[1].trim() : '';
+                const budget = matchBudg ? matchBudg[1].trim() : '';
+                const medianPrice = matchMed ? matchMed[1].trim() : '';
+
+                let method = '';
+                const methodMatch = projName.match(/โดยวิธี(.*)$/);
+                if (methodMatch) {
+                    method = methodMatch[1].trim();
+                }
+
+                // Extract Tables to find Bidders and Winners
+                const tables = this._extractTablesFromPage(items, pageNum);
+                
+                // Find Table 6 and 7
+                let table6 = tables.find(t => t.headers.join(' ').includes('ราคาที่เสนอ') || t.headers.join(' ').includes('รายชื่อผู้เสนอราคา'));
+                if (!table6) table6 = tables.find(t => t.rows.length > 0 && t.rows[0].join(' ').includes('รายชื่อผู้เสนอราคา'));
+
+                let table7 = tables.find(t => t.headers.join(' ').includes('เหตุผลที่คัดเลือก') || t.headers.join(' ').includes('ชื่อผู้ขาย'));
+                if (!table7) table7 = tables.find(t => t.rows.length > 0 && t.rows[0].join(' ').includes('เหตุผลที่คัดเลือก'));
+
+                // Format Table 6 (Bidders)
+                let bidders = [];
+                if (table6) {
+                    const dataRows = table6.rows.filter(r => !r.join(' ').includes('รายชื่อผู้เสนอราคา') && r.join('').trim().length > 0);
+                    bidders = dataRows.map(r => {
+                        const name = r.length >= 2 ? r[r.length - 2] : '';
+                        const price = r.length >= 1 ? r[r.length - 1] : r.join(' ');
+                        return `${name} / ${price}`.trim();
+                    });
+                }
+                const biddersStr = bidders.join('\n') || '-';
+
+                // Format Table 7 (Winners)
+                let winners = [];
+                let reason = '';
+                let contractInfo = '';
+                
+                if (table7) {
+                    const dataRows = table7.rows.filter(r => !r.join(' ').includes('เหตุผลที่คัดเลือก') && r.join('').trim().length > 0);
+                    if (dataRows.length > 0) {
+                        const r = dataRows[0]; // Take first winner
+                        const name = r.length > 2 ? r[2] : '';
+                        const price = r.length > 6 ? r[6] : (r.length > 1 ? r[r.length - 2] : '');
+                        winners.push(`${name} / ${price}`);
+                        
+                        reason = r[r.length - 1] || '';
+                        
+                        const contractNo = r.length > 4 ? r[4] : '';
+                        const contractDate = r.length > 5 ? r[5] : '';
+                        contractInfo = `${contractNo} ${contractDate}`.trim();
+                    }
+                }
+                const winnersStr = winners.join('\n') || '-';
+
+                // We skip pushing if we didn't find anything meaningful
+                if (projName || budget) {
+                    egpRows.push([
+                        egpRows.length + 1, // index
+                        projName,
+                        budget,
+                        medianPrice,
+                        method,
+                        biddersStr,
+                        winnersStr,
+                        reason,
+                        contractInfo
+                    ]);
+                }
+
+            } catch (err) {
+                console.warn(`Error processing page ${pageNum} in e-GP mode:`, err);
+            }
+        }
+
+        // Return a single consolidated table
+        return [{
+            headers: [
+                "ลำดับที่",
+                "งานที่จัดซื้อหรือจัดจ้าง",
+                "วงเงินที่จะซื้อหรือจ้าง",
+                "ราคากลาง",
+                "วิธีซื้อหรือจ้าง",
+                "รายชื่อผู้เสนอราคาและราคาที่เสนอ",
+                "ผู้ได้รับการคัดเลือกและราคาที่ตกลงซื้อหรือจ้าง",
+                "เหตุผลที่คัดเลือกโดยสรุป",
+                "เลขที่และวันที่ของสัญญาหรือข้อตกลงในการซื้อหรือจ้าง"
+            ],
+            rows: egpRows,
+            columnCount: 9,
+            pageNumber: 1
+        }];
+    }
 }

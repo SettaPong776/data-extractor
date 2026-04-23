@@ -59,6 +59,19 @@
                         <span class="badge badge-pdf">PDF</span>
                         <span class="badge badge-word">DOCX</span>
                     </div>
+
+                    <div class="extraction-mode" style="margin-top: 2rem; text-align: left; background: rgba(255,255,255,0.03); padding: 1rem 1.5rem; border-radius: var(--radius-sm); border: 1px solid var(--border); display: inline-block;">
+                        <h3 style="font-size: 1rem; margin-bottom: 0.8rem; color: var(--accent-light);"><span class="material-icons-round" style="font-size: 1.2rem; vertical-align: bottom;">psychology</span> โหมดสกัดข้อมูล</h3>
+                        <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 0.8rem; cursor: pointer;">
+                            <input type="radio" name="extractMode" value="generic" checked>
+                            <span>ดึงเฉพาะตารางทั่วไป (Generic Tables)</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="radio" name="extractMode" value="egp">
+                            <span>ดึงข้อมูล e-GP "ข้อมูลสาระสำคัญในสัญญา" (Smart e-GP Extractor)</span>
+                        </label>
+                    </div>
+
                     <input type="file" id="fileInput" accept=".pdf,.docx" hidden>
                 </div>
                 <div class="file-info" id="fileInfo" style="display:none">

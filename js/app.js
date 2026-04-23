@@ -123,9 +123,20 @@
                 els.progressDetail.textContent = `หน้า ${current} / ${total}`;
             };
 
+            const extractMode = document.querySelector('input[name="extractMode"]:checked').value;
+
             if (ext === 'pdf') {
-                tables = await pdfExtractor.extract(file, onProgress);
+                if (extractMode === 'egp') {
+                    tables = await pdfExtractor.extractEGP(file, onProgress);
+                    // Auto-select procurement template
+                    els.templateSelect.value = 'procurement';
+                } else {
+                    tables = await pdfExtractor.extract(file, onProgress);
+                }
             } else {
+                if (extractMode === 'egp') {
+                    showToast('โหมด e-GP รองรับเฉพาะไฟล์ PDF ในตอนนี้', 'info');
+                }
                 tables = await wordExtractor.extract(file, onProgress);
             }
 
