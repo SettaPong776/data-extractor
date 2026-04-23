@@ -300,19 +300,26 @@ class PDFExtractor {
                 });
                 const fullText = sortedItems.map(i => i.text).join(' ');
 
-                // Extract Fields using Regex
-                const matchProj = fullText.match(/3\.\s*ชื่อโครงการ\s*(.*?)\s*4\.\s*งบประมาณ/);
-                const matchBudg = fullText.match(/4\.\s*งบประมาณ\s*(.*?)\s*5\.\s*ราคากลาง/);
-                const matchMed = fullText.match(/5\.\s*ราคากลาง\s*(.*?)\s*(?:6\.\s*รายชื่อผู้เสนอราคา|6\.\s*รายชื่อ|$)/);
+                // Extract Fields using more permissive Regex
+                const pProj = fullText.match(/ชื่อโครงการ\s*(.*?)\s*(?:งบประมาณ|4\.|ราคากลาง)/);
+                let projName = pProj ? pProj[1].trim() : '';
 
-                let projName = matchProj ? matchProj[1].trim() : '';
-                const budget = matchBudg ? matchBudg[1].trim() : '';
-                const medianPrice = matchMed ? matchMed[1].trim() : '';
+                const pBudg = fullText.match(/งบประมาณ\s*(.*?)\s*(?:ราคากลาง|5\.|รายชื่อผู้เสนอ|6\.)/);
+                let budget = pBudg ? pBudg[1].trim() : '';
+
+                const pMed = fullText.match(/ราคากลาง\s*(.*?)\s*(?:รายชื่อ|6\.|ผู้ได้รับ|7\.)/);
+                let medianPrice = pMed ? pMed[1].trim() : '';
 
                 let method = '';
-                const methodMatch = projName.match(/โดยวิธี(.*)$/);
-                if (methodMatch) {
-                    method = methodMatch[1].trim();
+                const pMethod = projName.match(/วิธี([ก-๙a-zA-Z]+)/);
+                if (pMethod) {
+                    method = pMethod[1].trim();
+                } else if (fullText.includes('เฉพาะเจาะจง')) {
+                    method = 'เฉพาะเจาะจง';
+                } else if (fullText.includes('ประกวดราคา')) {
+                    method = 'ประกวดราคา';
+                } else if (fullText.includes('คัดเลือก')) {
+                    method = 'คัดเลือก';
                 }
 
                 // Extract Tables to find Bidders and Winners
@@ -359,8 +366,13 @@ class PDFExtractor {
                 }
                 const winnersStr = winners.join('\n') || '-';
 
-                // We skip pushing if we didn't find anything meaningful
-                if (projName || budget) {
+                // We push everything so user sees what happened
+                if (projName || budget || fullText.length > 50) {
+                    if (!projName && !budget) {
+                        projName = "⚠️ สกัดข้อมูลไม่สำเร็จ";
+                        budget = fullText.substring(0, 150) + "... (โปรดตรวจสอบไฟล์ต้นฉบับว่าใช่รูปแบบ e-GP หรือไม่ หรือเป็นไฟล์สแกน)";
+                    }
+
                     egpRows.push([
                         egpRows.length + 1, // index
                         projName,
@@ -371,6 +383,12 @@ class PDFExtractor {
                         winnersStr,
                         reason,
                         contractInfo
+                    ]);
+                } else if (fullText.trim().length === 0) {
+                    egpRows.push([
+                        egpRows.length + 1,
+                        "⚠️ ไฟล์นี้ไม่มีข้อความ (อาจเป็นไฟล์รูปภาพ/สแกน โปรแกรมไม่สามารถอ่านได้)",
+                        "", "", "", "", "", "", ""
                     ]);
                 }
 
