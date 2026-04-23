@@ -218,6 +218,11 @@ class WordExtractor {
             // Section 3: Project Name (Yellow)
             let projName = sections[3] || '';
             projName = projName.replace(/^.*?โครงการ\s*/, '').trim();
+            if (!projName) {
+                // Try to match "งานที่จัดซื้อหรือจัดจ้าง" or "ชื่อโครงการ"
+                const pMatch = fullText.match(/(?:ชื่อโครงการ|งานที่จัดซื้อหรือจัดจ้าง)\s*[:：]?\s*(.*?)(?=\s*(?:วงเงิน|งบประมาณ|ราคากลาง|วิธี|เลขที่)|$)/);
+                if (pMatch) projName = pMatch[1].trim();
+            }
             
             let method = '';
             const mm = projName.match(/\s*โดยวิธี(.*?)$/);
@@ -229,24 +234,37 @@ class WordExtractor {
             // Remove "ซื้อ" or "จ้าง" at the beginning to match user's exact example
             projName = projName.replace(/^(ซื้อ|จ้าง)\s*/, '').trim();
 
+            // Function to safely extract money amounts, ignoring e-GP IDs (10+ digits) and years (256x)
+            const extractMoney = (text, keywordRegex) => {
+                const matches = [...text.matchAll(new RegExp(keywordRegex.source + '[^\\d]{0,100}?([\\d,]+\\.\\d{2}|[\\d,]+)', 'g'))];
+                for (const m of matches) {
+                    const val = m[1].replace(/,/g, '');
+                    // Ignore years and e-GP IDs
+                    if (val.length < 10 && val !== '2568' && val !== '2569') {
+                        return m[1];
+                    }
+                }
+                return '';
+            };
+
             // Section 4: Budget (Dark Green)
             let budget = '';
-            const budgetMatch = fullText.match(/(?:งบประมาณ|วงเงิน)[^\d]*([\d,]+\.\d{2}|[\d,]+)/);
-            if (budgetMatch) {
-                budget = budgetMatch[1];
-            } else if (sections[4]) {
+            if (sections[4]) {
                 const bMatch = sections[4].match(/[\d,]+\.\d{2}|[\d,]+/);
                 if (bMatch) budget = bMatch[0];
+            }
+            if (!budget) {
+                budget = extractMoney(fullText, /(?:งบประมาณ|วงเงิน)/);
             }
 
             // Section 5: Median Price (Light Green)
             let medianPrice = '';
-            const medianMatch = fullText.match(/ราคากลาง[^\d]*([\d,]+\.\d{2}|[\d,]+)/);
-            if (medianMatch) {
-                medianPrice = medianMatch[1];
-            } else if (sections[5]) {
+            if (sections[5]) {
                 const mMatch = sections[5].match(/[\d,]+\.\d{2}|[\d,]+/);
                 if (mMatch) medianPrice = mMatch[0];
+            }
+            if (!medianPrice) {
+                medianPrice = extractMoney(fullText, /ราคากลาง/);
             }
 
             // Table 6: Bidders (Light Blue)
