@@ -347,7 +347,8 @@ class PDFExtractor {
                 // Format Table 7 (Winners)
                 let winners = [];
                 let reason = '';
-                let contractInfo = '';
+                let contractId = '';
+                let contractDate = '';
                 
                 if (table7) {
                     const dataRows = table7.rows.filter(r => !r.join(' ').includes('เหตุผลที่คัดเลือก') && r.join('').trim().length > 0);
@@ -359,9 +360,21 @@ class PDFExtractor {
                         
                         reason = r[r.length - 1] || '';
                         
-                        const contractNo = r.length > 4 ? r[4] : '';
-                        const contractDate = r.length > 5 ? r[5] : '';
-                        contractInfo = `${contractNo} ${contractDate}`.trim();
+                        // Extract e-GP ID (Pink) and Date (Red) using regex on the row to be safe
+                        const rowStr = r.join(' ');
+                        const eGpMatch = rowStr.match(/(6\d{11})/);
+                        if (eGpMatch) {
+                            contractId = eGpMatch[1];
+                        } else {
+                            contractId = r.length > 3 ? r[3] : ''; // Fallback to column index
+                        }
+
+                        const dateMatch = rowStr.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
+                        if (dateMatch) {
+                            contractDate = dateMatch[1];
+                        } else {
+                            contractDate = r.length > 5 ? r[5] : ''; // Fallback
+                        }
                     }
                 }
                 const winnersStr = winners.join('\n') || '-';
@@ -374,21 +387,22 @@ class PDFExtractor {
                     }
 
                     egpRows.push([
-                        egpRows.length + 1, // index
-                        projName,
-                        budget,
-                        medianPrice,
-                        method,
-                        biddersStr,
-                        winnersStr,
-                        reason,
-                        contractInfo
+                        egpRows.length + 1, // index (1)
+                        projName,           // (2) Yellow
+                        budget,             // (3) Dark Green
+                        medianPrice,        // (4) Light Green
+                        method,             // (5) White
+                        biddersStr,         // (6) Light Blue
+                        winnersStr,         // (7) Blue
+                        reason,             // (8) Grey
+                        contractId,         // (9) Pink (e-GP ID)
+                        contractDate        // (10) Red (Date)
                     ]);
                 } else if (fullText.trim().length === 0) {
                     egpRows.push([
                         egpRows.length + 1,
                         "⚠️ ไฟล์นี้ไม่มีข้อความ (อาจเป็นไฟล์รูปภาพ/สแกน โปรแกรมไม่สามารถอ่านได้)",
-                        "", "", "", "", "", "", ""
+                        "", "", "", "", "", "", "", ""
                     ]);
                 }
 
@@ -408,10 +422,11 @@ class PDFExtractor {
                 "รายชื่อผู้เสนอราคาและราคาที่เสนอ",
                 "ผู้ได้รับการคัดเลือกและราคาที่ตกลงซื้อหรือจ้าง",
                 "เหตุผลที่คัดเลือกโดยสรุป",
-                "เลขที่และวันที่ของสัญญาหรือข้อตกลงในการซื้อหรือจ้าง"
+                "เลขที่สัญญา/ข้อตกลง",
+                "วันที่ของสัญญา/ข้อตกลง"
             ],
             rows: egpRows,
-            columnCount: 9,
+            columnCount: 10,
             pageNumber: 1
         }];
     }
