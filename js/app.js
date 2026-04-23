@@ -47,6 +47,10 @@
         exportSummary: $('#exportSummary'),
         exportFilename: $('#exportFilename'),
         stepLineFill: $('#stepLineFill'),
+        templateSelect: $('#templateSelect'),
+        templateSettings: $('#templateSettings'),
+        exportTitle: $('#exportTitle'),
+        exportSubtitle: $('#exportSubtitle'),
     };
 
     // ===== INITIALIZATION =====
@@ -276,8 +280,48 @@
         const table = state.tables[state.activeTableIndex];
         if (!table) return;
 
-        columnMapper.setHeaders(table.headers);
+        applyTemplateToMapper(table.headers);
         renderMappedPreview();
+        
+        els.templateSelect.addEventListener('change', () => {
+            applyTemplateToMapper(table.headers);
+            renderMappedPreview();
+        });
+    }
+
+    function applyTemplateToMapper(originalHeaders) {
+        const template = els.templateSelect.value;
+        
+        if (template === 'procurement') {
+            const procurementHeaders = [
+                "ลำดับที่",
+                "งานที่จัดซื้อหรือจัดจ้าง",
+                "วงเงินที่จะซื้อหรือจ้าง",
+                "ราคากลาง",
+                "วิธีซื้อหรือจ้าง",
+                "รายชื่อผู้เสนอราคาและราคาที่เสนอ",
+                "ผู้ได้รับการคัดเลือกและราคาที่ตกลงซื้อหรือจ้าง",
+                "เหตุผลที่คัดเลือกโดยสรุป",
+                "เลขที่และวันที่ของสัญญาหรือข้อตกลงในการซื้อหรือจ้าง"
+            ];
+            
+            // Map original headers to procurement headers
+            // We assume the first 9 extracted columns correspond to these
+            const mapping = originalHeaders.map((h, i) => ({
+                sourceIndex: i,
+                sourceName: h || `คอลัมน์ ${i + 1}`,
+                targetName: procurementHeaders[i] || h || `คอลัมน์ ${i + 1}`,
+                enabled: i < procurementHeaders.length,
+                order: i
+            }));
+            
+            // Set directly in column mapper
+            columnMapper.mapping = mapping;
+            columnMapper.render();
+        } else {
+            // Custom - default mapping
+            columnMapper.setHeaders(originalHeaders);
+        }
     }
 
     function setupColumnMapper() {
@@ -311,6 +355,13 @@
         const table = state.tables[state.activeTableIndex];
         if (!table) return;
 
+        const template = els.templateSelect.value;
+        if (template === 'procurement') {
+            els.templateSettings.style.display = 'block';
+        } else {
+            els.templateSettings.style.display = 'none';
+        }
+
         const mapped = columnMapper.applyMapping(table.rows);
         els.exportSummary.textContent =
             `${mapped.headers.length} คอลัมน์ × ${mapped.rows.length} แถว — พร้อมดาวน์โหลด`;
@@ -326,6 +377,13 @@
                 const table = state.tables[state.activeTableIndex];
                 const mapped = columnMapper.applyMapping(table.rows);
                 const filename = els.exportFilename.value.trim() || 'extracted_data';
+                
+                const template = els.templateSelect.value;
+                const templateConfig = template === 'procurement' ? {
+                    type: 'procurement',
+                    title: els.exportTitle.value.trim(),
+                    subtitle: els.exportSubtitle.value.trim()
+                } : null;
 
                 // If multiple tables exist, export all
                 if (state.tables.length > 1) {
@@ -337,9 +395,9 @@
                         }
                         return { name: `Table ${i + 1}`, headers: t.headers, rows: t.rows };
                     });
-                    excelExporter.exportMultiple(allMapped, filename);
+                    excelExporter.exportMultiple(allMapped, filename, templateConfig);
                 } else {
-                    excelExporter.export(mapped, filename);
+                    excelExporter.export(mapped, filename, templateConfig);
                 }
 
                 showToast('ดาวน์โหลดไฟล์ Excel สำเร็จ!', 'success');

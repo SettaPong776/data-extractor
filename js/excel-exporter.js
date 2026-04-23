@@ -7,11 +7,34 @@ class ExcelExporter {
      * @param {Object} data — { headers: string[], rows: string[][] }
      * @param {string} filename — ชื่อไฟล์ (ไม่ต้องมีนามสกุล)
      */
-    export(data, filename = 'extracted_data') {
+    export(data, filename = 'extracted_data', templateConfig = null) {
         const wb = XLSX.utils.book_new();
 
-        // Build array of arrays: [headers, ...rows]
-        const aoa = [data.headers, ...data.rows];
+        let aoa = [];
+        if (templateConfig && templateConfig.type === 'procurement') {
+            // Row 1-5: blank
+            for(let i=0; i<5; i++) aoa.push([]);
+            
+            // Row 6: Title (place in column E / index 4 for centering approx)
+            const titleRow = [];
+            titleRow[4] = templateConfig.title;
+            aoa.push(titleRow);
+            
+            // Row 7: Subtitle
+            const subTitleRow = [];
+            subTitleRow[4] = templateConfig.subtitle;
+            aoa.push(subTitleRow);
+            
+            // Row 8: blank
+            aoa.push([]);
+            
+            // Row 9+: headers and data
+            aoa.push(data.headers);
+            aoa.push(...data.rows);
+        } else {
+            // Build array of arrays: [headers, ...rows]
+            aoa = [data.headers, ...data.rows];
+        }
 
         const ws = XLSX.utils.aoa_to_sheet(aoa);
 
@@ -40,11 +63,28 @@ class ExcelExporter {
      * @param {Array<Object>} tables — array of { name, headers, rows }
      * @param {string} filename
      */
-    exportMultiple(tables, filename = 'extracted_data') {
+    exportMultiple(tables, filename = 'extracted_data', templateConfig = null) {
         const wb = XLSX.utils.book_new();
 
         tables.forEach((table, idx) => {
-            const aoa = [table.headers, ...table.rows];
+            let aoa = [];
+            if (templateConfig && templateConfig.type === 'procurement') {
+                for(let i=0; i<5; i++) aoa.push([]);
+                
+                const titleRow = [];
+                titleRow[4] = templateConfig.title;
+                aoa.push(titleRow);
+                
+                const subTitleRow = [];
+                subTitleRow[4] = templateConfig.subtitle;
+                aoa.push(subTitleRow);
+                
+                aoa.push([]);
+                aoa.push(table.headers);
+                aoa.push(...table.rows);
+            } else {
+                aoa = [table.headers, ...table.rows];
+            }
             const ws = XLSX.utils.aoa_to_sheet(aoa);
 
             // Auto-size
