@@ -291,21 +291,18 @@ class WordExtractor {
                     if (pMatch) projName = pMatch[1].trim();
                 }
 
-                // 2. Extract Budget and Median Price
-                // Matches "8198 บาท8198 บาท" or "8,198.00 บาท 8,198.00 บาท"
-                if (!budget || budget.length >= 10 || budget === medianPrice) {
-                    const bmMatch = blob.match(/([\d,]+(?:\.\d{2})?)\s*บาท\s*([\d,]+(?:\.\d{2})?)\s*บาท/);
-                    if (bmMatch) {
-                        budget = bmMatch[1];
-                        medianPrice = bmMatch[2];
-                    }
-                }
-
-                // 3. Clean up biddersStr if it's a huge mashed string
-                if (biddersStr.length > 150 && biddersStr.includes('รายชื่อผู้เสนอราคา')) {
-                    const bidderMatch = blob.match(/\d{13}\s*(.*?)\s*([\d,]+\.\d{2})\s*(?:ผู้ที่ได้รับ|$)/);
-                    if (bidderMatch) {
-                        biddersStr = `${bidderMatch[1].trim()}/ ${bidderMatch[2]} บาท`;
+                // 2. Extract Budget, Median, and clean Bidder from the proposed price
+                // User requested: "ดูเลขจาก column รายชื่อผู้เสนอราคา... ให้ดึงแต่ตัวเลขเงินมา เช่น 8,198.00 บาท จะแสดง ใน วงเงิน... กับ ราคากลาง"
+                const bidderMatch = blob.match(/\d{13}\s*(.*?)\s*([\d,]+\.\d{2})/);
+                if (bidderMatch) {
+                    const proposedPrice = bidderMatch[2]; // e.g., "8,198.00"
+                    
+                    budget = proposedPrice;
+                    medianPrice = proposedPrice;
+                    
+                    // Clean up biddersStr if it's a huge mashed string
+                    if (biddersStr.length > 150) {
+                        biddersStr = `${bidderMatch[1].trim()}/ ${proposedPrice} บาท`;
                     }
                 }
             }
