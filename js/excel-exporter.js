@@ -12,23 +12,17 @@ class ExcelExporter {
 
         let aoa = [];
         if (templateConfig && templateConfig.type === 'procurement') {
-            // Row 1-5: blank
-            for(let i=0; i<5; i++) aoa.push([]);
-            
-            // Row 6: Title (place in column E / index 4 for centering approx)
+            // Row 1: Title (place in column E / index 4 for centering approx)
             const titleRow = [];
             titleRow[4] = templateConfig.title;
             aoa.push(titleRow);
             
-            // Row 7: Subtitle
+            // Row 2: Subtitle
             const subTitleRow = [];
             subTitleRow[4] = templateConfig.subtitle;
             aoa.push(subTitleRow);
             
-            // Row 8: blank
-            aoa.push([]);
-            
-            // Row 9+: headers and data
+            // Row 3: headers and data
             aoa.push(data.headers);
             aoa.push(...data.rows);
         } else {
@@ -69,8 +63,6 @@ class ExcelExporter {
         tables.forEach((table, idx) => {
             let aoa = [];
             if (templateConfig && templateConfig.type === 'procurement') {
-                for(let i=0; i<5; i++) aoa.push([]);
-                
                 const titleRow = [];
                 titleRow[4] = templateConfig.title;
                 aoa.push(titleRow);
@@ -79,7 +71,6 @@ class ExcelExporter {
                 subTitleRow[4] = templateConfig.subtitle;
                 aoa.push(subTitleRow);
                 
-                aoa.push([]);
                 aoa.push(table.headers);
                 aoa.push(...table.rows);
             } else {
