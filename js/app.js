@@ -135,9 +135,11 @@
                 }
             } else {
                 if (extractMode === 'egp') {
-                    showToast('โหมด e-GP รองรับเฉพาะไฟล์ PDF ในตอนนี้', 'info');
+                    tables = await wordExtractor.extractEGP(file, onProgress);
+                    els.templateSelect.value = 'procurement';
+                } else {
+                    tables = await wordExtractor.extract(file, onProgress);
                 }
-                tables = await wordExtractor.extract(file, onProgress);
             }
 
             els.progressFill.style.width = '100%';
