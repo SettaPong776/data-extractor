@@ -136,6 +136,21 @@ class WordExtractor {
     }
 
     /**
+     * Format number string to currency format with commas and 2 decimals
+     */
+    _formatCurrency(text) {
+        if (!text) return '';
+        const match = text.match(/[\d,]+(\.\d+)?/);
+        if (match) {
+            const num = parseFloat(match[0].replace(/,/g, ''));
+            if (!isNaN(num)) {
+                return text.replace(match[0], num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+            }
+        }
+        return text;
+    }
+
+    /**
      * Smart e-GP Extractor for DOCX files (Multi-page)
      * Strategy: Each form has exactly 2 tables (Table 6 + Table 7)
      * So we pair tables and find text sections between them
@@ -206,10 +221,10 @@ class WordExtractor {
             const t6 = allTables[fi * 2];     // Table 6 (bidders)
             const t7 = allTables[fi * 2 + 1]; // Table 7 (winners)
 
-            // Text before table 6 = textBetweenTables[fi * 2]
-            // Text between table 6 and table 7 = textBetweenTables[fi * 2 + 1]
-            const sectionText = textBetweenTables[fi * 2] || '';
-            const fullText = sectionText.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+            // Combine text before table 6 AND between table 6/7 for robust section extraction
+            const textBeforeT6 = textBetweenTables[fi * 2] || '';
+            const textBetweenT6T7 = textBetweenTables[fi * 2 + 1] || '';
+            const fullText = (textBeforeT6 + ' ' + textBetweenT6T7).replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
             if (fi === 0) console.log(`[e-GP DOCX] Form 1 text:`, fullText.substring(0, 200) + '...');
 
             // Extract by splitting the full text into numbered sections
@@ -245,48 +260,146 @@ class WordExtractor {
             // Remove "ซื้อ" or "จ้าง" at the beginning to match user's exact example
             projName = projName.replace(/^(ซื้อ|จ้าง)\s*/, '').trim();
 
-            // Function to safely extract money amounts, ignoring e-GP IDs (10+ digits) and years (256x)
+            // Function to safely extract money amounts, ignoring e-GP IDs (10+ digits) and years
             const extractMoney = (text, keywordRegex) => {
-                const matches = [...text.matchAll(new RegExp(keywordRegex.source + '[^\\d]{0,100}?([\\d,]+\\.\\d{2}|[\\d,]+)', 'g'))];
+                // Try to match value with "บาท" first for accuracy
+                const patStrBaht = keywordRegex.source + '[^0-9]{0,100}?([0-9][0-9,]*[.][0-9]{1,2}|[0-9][0-9,]*)\\s*บาท';
+                let matches = [...text.matchAll(new RegExp(patStrBaht, 'g'))];
+                
+                if (matches.length === 0) {
+                    // Fallback to without "บาท", but require at least 3 digits or a decimal to avoid grabbing standalone "6"
+                    const patStr = keywordRegex.source + '[^0-9]{0,100}?([0-9][0-9,]*[.][0-9]{1,2}|[0-9][0-9,]{3,})';
+                    matches = [...text.matchAll(new RegExp(patStr, 'g'))];
+                }
+                
                 for (const m of matches) {
                     const val = m[1].replace(/,/g, '');
-                    // Ignore years and e-GP IDs
-                    if (val.length < 10 && val !== '2568' && val !== '2569') {
+                    if (val.length < 10 && !/^25[6-7][0-9]$/.test(val)) {
                         return m[1];
                     }
                 }
                 return '';
             };
 
-            // Section 4: Budget (Dark Green)
-            let budget = '';
-            if (sections[4]) {
-                const bMatch = sections[4].match(/[\d,]+\.\d{2}|[\d,]+/);
-                if (bMatch) budget = bMatch[0];
-            }
+            const extractSectionMoney = (text) => {
+                if (!text) return '';
+                // 1. Try to find a number followed by "บาท"
+                const m1 = text.match(/([\d,]+(?:\.\d{1,2})?)\s*บาท/);
+                if (m1) return m1[1];
+                // 2. Try to find a number with a decimal point (like 52,943.60 or 52943.6)
+                const m2 = text.match(/([\d,]+\.\d{1,2})/);
+                if (m2) return m2[1];
+                // 3. Fallback to any number that is at least 3 digits (to avoid matching "6" in "6 รายการ")
+                const m3 = text.match(/([1-9][\d,]{2,})/);
+                if (m3) return m3[1];
+                // 4. Last resort: any number
+                const m4 = text.match(/[\d,]+/);
+                return m4 ? m4[0] : '';
+            };
+
+            // Section 4: Budget (Dark Green) — ดึงจาก "4. งบประมาณ XXX บาท"
+            let budget = extractSectionMoney(sections[4]);
             if (!budget) {
                 budget = extractMoney(fullText, /(?:งบประมาณ|วงเงิน)/);
             }
 
-            // Section 5: Median Price (Light Green)
-            let medianPrice = '';
-            if (sections[5]) {
-                const mMatch = sections[5].match(/[\d,]+\.\d{2}|[\d,]+/);
-                if (mMatch) medianPrice = mMatch[0];
-            }
+            // Section 5: Median Price (Light Green) — ดึงจาก "5. ราคากลาง XXX บาท"
+            let medianPrice = extractSectionMoney(sections[5]);
             if (!medianPrice) {
                 medianPrice = extractMoney(fullText, /ราคากลาง/);
             }
 
+            // FALLBACK: When Thai keywords are garbled, use STRUCTURAL approach
+            // In e-GP documents, the last two "NUMBER บาท" in text BEFORE table 6
+            // are always budget (section 4) and median price (section 5)
+            if (!budget || !medianPrice) {
+                const preTableText = textBeforeT6.replace(/\n/g, ' ');
+                const allMoneyMatches = [];
+                const moneyPattern = /(\d[\d,]*(?:\.\d{2})?)\s*บาท/g;
+                let mm;
+                while ((mm = moneyPattern.exec(preTableText)) !== null) {
+                    const val = mm[1].replace(/,/g, '');
+                    // Skip years (2565-2579) and e-GP IDs (10+ digits)
+                    if (val.length < 10 && !/^25[6-7][0-9]$/.test(val)) {
+                        allMoneyMatches.push(mm[1]);
+                    }
+                }
+                if (fi < 3) console.log(`[e-GP DOCX] Form ${fi+1} money-in-text:`, allMoneyMatches);
+                if (allMoneyMatches.length >= 2) {
+                    // Last two = budget, median price
+                    if (!budget) budget = allMoneyMatches[allMoneyMatches.length - 2];
+                    if (!medianPrice) medianPrice = allMoneyMatches[allMoneyMatches.length - 1];
+                } else if (allMoneyMatches.length === 1) {
+                    if (!budget) budget = allMoneyMatches[0];
+                    if (!medianPrice) medianPrice = allMoneyMatches[0];
+                }
+            }
+
+            if (fi < 3 || !budget) {
+                console.log(`[e-GP DOCX] Form ${fi+1}: budget="${budget}", median="${medianPrice}"`);
+            }
+
+            budget = this._formatCurrency(budget);
+            medianPrice = this._formatCurrency(medianPrice);
+
             // Table 6: Bidders (Light Blue)
             let biddersStr = '-';
             let blob = '';
+            let biddersList = []; // structured data for cross-referencing with Table 7
             if (t6 && t6.rows.length > 0) {
+                if (fi < 3) console.log(`[e-GP DOCX] Form ${fi+1} T6: ${t6.rows.length} rows`, t6.rows.map(r => r.join(' | ')));
                 const bidders = t6.rows.map(r => {
-                    const name = r.length >= 2 ? r[r.length - 2] : '';
-                    const price = r.length >= 1 ? r[r.length - 1] : '';
-                    return `${name}/ ${price} บาท`.trim();
-                }).filter(b => b.length > 5);
+                    // Smart detect: find company name and price by content pattern
+                    let bName = '';
+                    let bPrice = '';
+                    
+                    // Scan for company name (left to right)
+                    for (const cell of r) {
+                        const c = (cell || '').trim();
+                        if (!c) continue;
+                        if (!bName && /บริษัท|ห้าง|ร้าน|สหกรณ์|หจก|นาย|นาง|กิจการ/.test(c)) {
+                            bName = c;
+                            break;
+                        }
+                    }
+                    
+                    // Scan for price from RIGHT to LEFT (price is always last numeric column)
+                    for (let ci = r.length - 1; ci >= 0; ci--) {
+                        const c = (r[ci] || '').trim();
+                        if (!c) continue;
+                        // Skip tax IDs and e-GP IDs (10+ digits)
+                        const digitsOnly = c.replace(/[,.\s]/g, '');
+                        if (/^\d+$/.test(digitsOnly) && digitsOnly.length >= 10) continue;
+                        // Match decimal price like 732,499.00 or 52943.6
+                        const pm = c.match(/([\d,]+\.\d{1,2})/);
+                        if (pm) { bPrice = pm[1]; break; }
+                        // Match integer price like 770000 (at least 3 digits, not a tax ID)
+                        if (/^[\d,]+$/.test(c) && digitsOnly.length >= 3 && digitsOnly.length < 10) {
+                            bPrice = c; break;
+                        }
+                    }
+                    
+                    // Fallback: last 2 columns
+                    if (!bName && r.length >= 2) {
+                        const cand = r[r.length - 2].trim();
+                        if (cand && !/^\d+$/.test(cand) && !/^\d{13}$/.test(cand)) bName = cand;
+                    }
+                    if (!bPrice && r.length >= 1) {
+                        const cand = r[r.length - 1].trim();
+                        const dOnly = cand.replace(/[,.\s]/g, '');
+                        if (dOnly.length < 10) {
+                            const pm = cand.match(/([\d,]+\.\d{1,2})/);
+                            if (pm) bPrice = pm[1];
+                            else if (/^[\d,]+$/.test(cand) && dOnly.length >= 3) bPrice = cand;
+                        }
+                    }
+                    if (bName && bPrice && /\d/.test(bPrice)) {
+                        bPrice = this._formatCurrency(bPrice);
+                        biddersList.push({ name: bName, price: bPrice });
+                        return `${bName} / ${bPrice} บาท`;
+                    }
+                    return null;
+                }).filter(b => b !== null);
                 if (bidders.length > 0) biddersStr = bidders.join('\n');
                 
                 // Keep the raw text for fallback parsing
@@ -327,35 +440,28 @@ class WordExtractor {
                 }
             }
 
-            // 2. Extract Budget, Median, and clean Bidder from the proposed price
-            // User requested: "ดูเลขจาก column รายชื่อผู้เสนอราคา... ให้ดึงแต่ตัวเลขเงินมา เช่น 8,198.00 บาท จะแสดง ใน วงเงิน... กับ ราคากลาง"
+            // 2. Fallback: use bidder price for budget/median ONLY when sections 4/5 had no data
             let proposedPrice = '';
-            
-            // Try from the clean biddersStr first
             if (biddersStr && biddersStr !== '-') {
-                const priceMatch = biddersStr.match(/([\d,]+\.\d{2})/);
+                const priceMatch = biddersStr.match(/([\d,]+\.\d{1,2})/);
                 if (priceMatch) proposedPrice = priceMatch[1];
             }
-            
-            // Try from the blob if it's a huge mashed string
             if (!proposedPrice && blob.length > 20) {
-                const bidderMatch = blob.match(/\d{13}\s*(.*?)\s*([\d,]+\.\d{2})/);
+                const bidderMatch = blob.match(/\d{13}\s*(.*?)\s*([\d,]+\.\d{1,2})/);
                 if (bidderMatch) {
-                    proposedPrice = bidderMatch[2]; // e.g., "8,198.00"
-                    // Clean up biddersStr
+                    proposedPrice = bidderMatch[2];
                     if (biddersStr.length > 150) {
-                        biddersStr = `${bidderMatch[1].trim()}/ ${proposedPrice} บาท`;
+                        biddersStr = `${bidderMatch[1].trim()} / ${proposedPrice} บาท`;
                     }
                 }
             }
-
-            // Apply the proposed price to Budget and Median Price ALWAYS
+            // Only apply as fallback — never overwrite values from section 4/5
             if (proposedPrice) {
-                budget = proposedPrice;
-                medianPrice = proposedPrice;
+                if (!budget) budget = proposedPrice;
+                if (!medianPrice) medianPrice = proposedPrice;
             }
 
-            // Table 7: Winners
+            // Table 7: Winners — cross-reference with biddersList from Table 6
             let winnersStr = '-';
             let reason = '';
             let contractId = '';
@@ -367,12 +473,25 @@ class WordExtractor {
                     const r = dataRows[0];
                     const rowStr = r.join(' ');
 
-                    const nameCol = r.findIndex(c => /บริษัท|ห้าง|ร้าน|สหกรณ์/.test(c));
-                    const name = nameCol >= 0 ? r[nameCol] : (r.length > 2 ? r[2] : '');
+                    // Find price in Table 7
                     const priceCol = r.findIndex(c => /^[\d,]+\.\d{2}$/.test(c.trim()));
-                    const price = priceCol >= 0 ? r[priceCol] : '';
+                    let winPrice = priceCol >= 0 ? r[priceCol].trim() : '';
 
-                    winnersStr = `${name}/ ${price} บาท`.trim();
+                    // Cross-reference: match Table 7 price against bidders from Table 6
+                    let winName = '';
+                    if (winPrice && biddersList.length > 1) {
+                        const normWin = winPrice.replace(/,/g, '');
+                        const matched = biddersList.find(b => b.price.replace(/,/g, '') === normWin);
+                        if (matched) winName = matched.name;
+                    }
+                    // Fallback: find name directly from Table 7
+                    if (!winName) {
+                        const nameCol = r.findIndex(c => /บริษัท|ห้าง|ร้าน|สหกรณ์/.test(c));
+                        winName = nameCol >= 0 ? r[nameCol] : (r.length > 2 ? r[2] : '');
+                    }
+
+                    if (winPrice) winPrice = this._formatCurrency(winPrice);
+                    winnersStr = winPrice ? `${winName} / ${winPrice} บาท`.trim() : (winName || '-');
                     reason = r[r.length - 1] || '';
 
                     const eGpMatch = rowStr.match(/(6\d{11})/);
@@ -501,6 +620,7 @@ class WordExtractor {
                 // Clean up amount format
                 const amtMatch = amount.match(/([\d,]+\.\d{2})/);
                 if (amtMatch) amount = amtMatch[1];
+                amount = this._formatCurrency(amount);
 
                 // Format date if it's DD/MM/YYYY, else keep as is (e.g. 2 ส.ค. 2568)
                 let contractDate = dateStr;
@@ -521,7 +641,7 @@ class WordExtractor {
                     seq++,
                     item,            // 2. งานที่จัดซื้อหรือจัดจ้าง
                     amount,          // 3. วงเงิน
-                    '',              // 4. ราคากลาง (เว้นว่าง)
+                    amount,          // 4. ราคากลาง (ใช้ amount เหมือนวงเงิน)
                     '',              // 5. วิธีซื้อหรือจ้าง (เว้นว่าง)
                     biddersStr,      // 6. รายชื่อผู้เสนอราคา
                     biddersStr,      // 7. ผู้ได้รับการคัดเลือก

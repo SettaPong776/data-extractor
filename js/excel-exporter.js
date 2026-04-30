@@ -1,11 +1,13 @@
 /**
  * ExcelExporter — ส่งออกข้อมูลเป็นไฟล์ .xlsx โดยใช้ SheetJS
+ * ใช้ Blob + Anchor tag แทน XLSX.writeFile() เพื่อให้ชื่อไฟล์ถูกต้อง
  */
 class ExcelExporter {
     /**
      * Export data to Excel file and trigger download
      * @param {Object} data — { headers: string[], rows: string[][] }
      * @param {string} filename — ชื่อไฟล์ (ไม่ต้องมีนามสกุล)
+     * @param {Object|null} templateConfig — { type, title, subtitle }
      */
     export(data, filename = 'extracted_data', templateConfig = null) {
         const wb = XLSX.utils.book_new();
@@ -43,19 +45,17 @@ class ExcelExporter {
         });
         ws['!cols'] = colWidths;
 
-        // Style header row (SheetJS free version has limited styling)
-        // But we can set bold via cell properties if available
-
         XLSX.utils.book_append_sheet(wb, ws, 'Data');
 
-        // Trigger download
-        XLSX.writeFile(wb, `${filename}.xlsx`);
+        // Trigger download using Blob + Anchor (reliable filename)
+        this._downloadWorkbook(wb, filename);
     }
 
     /**
      * Export multiple tables to separate sheets
      * @param {Array<Object>} tables — array of { name, headers, rows }
      * @param {string} filename
+     * @param {Object|null} templateConfig
      */
     exportMultiple(tables, filename = 'extracted_data', templateConfig = null) {
         const wb = XLSX.utils.book_new();
@@ -94,6 +94,37 @@ class ExcelExporter {
             XLSX.utils.book_append_sheet(wb, ws, sheetName.substring(0, 31));
         });
 
-        XLSX.writeFile(wb, `${filename}.xlsx`);
+        this._downloadWorkbook(wb, filename);
+    }
+
+    /**
+     * Download workbook as .xlsx using Blob + Anchor tag
+     * This ensures the filename and extension are always correct
+     */
+    _downloadWorkbook(wb, filename) {
+        // Generate Excel binary data
+        const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+        
+        // Create Blob with correct MIME type
+        const blob = new Blob([wbout], {
+            type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        });
+        
+        // Create download link
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${filename}.xlsx`;
+        a.style.display = 'none';
+        
+        // Trigger download
+        document.body.appendChild(a);
+        a.click();
+        
+        // Cleanup
+        setTimeout(() => {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }, 200);
     }
 }

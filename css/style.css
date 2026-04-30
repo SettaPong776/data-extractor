@@ -331,6 +331,12 @@ body {
     border: 1px solid rgba(59, 130, 246, 0.2);
 }
 
+.badge-excel {
+    background: rgba(16, 185, 129, 0.12);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
 /* File Info */
 .file-info {
     display: flex;

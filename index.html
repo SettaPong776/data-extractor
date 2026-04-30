@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Data Extractor — แยกข้อมูลตารางจาก PDF/Word</title>
-    <meta name="description" content="โปรแกรมแยกข้อมูลตารางจากไฟล์ PDF และ Word แล้วส่งออกเป็น Excel">
+    <title>Data Extractor — แยกข้อมูลตารางจาก PDF/Word/Excel</title>
+    <meta name="description" content="โปรแกรมแยกข้อมูลตารางจากไฟล์ PDF, Word และ Excel แล้วส่งออกเป็น Excel">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
@@ -18,7 +18,7 @@
                 <span class="logo-icon material-icons-round">table_chart</span>
                 <h1>Data Extractor</h1>
             </div>
-            <p class="tagline">แยกข้อมูลตารางจาก PDF / Word → Excel</p>
+            <p class="tagline">แยกข้อมูลตารางจาก PDF / Word / Excel → Excel</p>
         </div>
     </header>
 
@@ -56,9 +56,11 @@
                     <h2>ลากไฟล์มาวางที่นี่</h2>
                     <div class="upload-formats">
                         <span class="badge badge-word">DOCX</span>
+                        <span class="badge badge-excel">XLSX</span>
+                        <span class="badge badge-excel">XLS</span>
                     </div>
 
-                    <input type="file" id="fileInput" accept=".docx" hidden>
+                    <input type="file" id="fileInput" accept=".docx,.xlsx,.xls" hidden>
                 </div>
                 
                 <!-- Link to PDF to DOCX converter -->
@@ -229,10 +231,11 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
-    <script src="js/pdf-extractor.js?v=36"></script>
-    <script src="js/word-extractor.js?v=36"></script>
-    <script src="js/column-mapper.js?v=36"></script>
-    <script src="js/excel-exporter.js?v=36"></script>
-    <script src="js/app.js?v=36"></script>
+    <script src="js/pdf-extractor.js?v=39"></script>
+    <script src="js/word-extractor.js?v=39"></script>
+    <script src="js/excel-reader.js?v=39"></script>
+    <script src="js/column-mapper.js?v=39"></script>
+    <script src="js/excel-exporter.js?v=39"></script>
+    <script src="js/app.js?v=39"></script>
 </body>
 </html>

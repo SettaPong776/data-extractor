@@ -224,6 +224,21 @@ class PDFExtractor {
     }
 
     /**
+     * Format number string to currency format with commas and 2 decimals
+     */
+    _formatCurrency(text) {
+        if (!text) return '';
+        const match = text.match(/[\d,]+(\.\d+)?/);
+        if (match) {
+            const num = parseFloat(match[0].replace(/,/g, ''));
+            if (!isNaN(num)) {
+                return text.replace(match[0], num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+            }
+        }
+        return text;
+    }
+
+    /**
      * Merge consecutive tables that have the same column structure
      */
     _mergeTables(tables) {
@@ -290,7 +305,7 @@ class PDFExtractor {
                         height: Math.abs(item.transform[3]) || 12
                     }));
 
-                if (items.length < 3) continue;
+                if (items.length < 1) continue;
 
                 // Group items into lines (sorted by Y then X)
                 const lines = this._clusterByY(items);
@@ -373,11 +388,13 @@ class PDFExtractor {
                 let budget = sections[4] || '';
                 budget = budget.replace(/^.*?[มณ]\s+/, function(m) { return m.length <= 15 ? '' : m; });
                 budget = budget.replace(/\s*บาท\s*$/, '').trim();
+                budget = this._formatCurrency(budget);
 
                 // === Section 5: Median Price (Light Green) ===
                 let medianPrice = sections[5] || '';
                 medianPrice = medianPrice.replace(/^.*?กลาง\s*/, '');
                 medianPrice = medianPrice.replace(/\s*บาท\s*$/, '').trim();
+                medianPrice = this._formatCurrency(medianPrice);
 
                 // === Tables 6 & 7: Bidders and Winners ===
                 const tables = this._extractTablesFromPage(items, pageNum);
@@ -402,6 +419,7 @@ class PDFExtractor {
 
                 // Format Table 6 (Bidders — Light Blue)
                 let bidders = [];
+                let biddersList = []; // Structured bidder data for cross-referencing
                 if (table6) {
                     const dataRows = table6.rows.filter(r =>
                         r.some(cell => /\d{13}/.test(cell)) || r.some(cell => /[\d,]+\.\d{2}/.test(cell))
@@ -409,12 +427,22 @@ class PDFExtractor {
                     bidders = dataRows.map(r => {
                         const name = r.length >= 2 ? r[r.length - 2] : '';
                         const price = r.length >= 1 ? r[r.length - 1] : '';
-                        return `${name}/ ${price} บาท`.trim();
-                    });
+                        // Extract clean numeric price (strip "บาท" and whitespace)
+                        const priceMatch = price.match(/([\d,]+\.\d{2})/);
+                        let cleanPrice = priceMatch ? priceMatch[1] : price.replace(/[^\d,.]/g, '').replace(/^[,.]|[,.]$/g, '');
+                        cleanPrice = this._formatCurrency(cleanPrice);
+                        const cleanName = name.trim();
+                        // Only add valid bidders (must have name AND numeric price)
+                        if (cleanName && cleanPrice && /\d/.test(cleanPrice)) {
+                            biddersList.push({ name: cleanName, price: cleanPrice, raw: price.trim() });
+                            return `${cleanName} / ${cleanPrice} บาท`;
+                        }
+                        return null;
+                    }).filter(b => b !== null);
                 }
                 const biddersStr = bidders.join('\n') || '-';
 
-                // Format Table 7 (Winners — Blue + Grey + Pink + Red)
+                // Format Table 7 (Winners — cross-reference with biddersList from Table 6)
                 let winnersStr = '-';
                 let reason = '';
                 let contractId = '';
@@ -426,9 +454,43 @@ class PDFExtractor {
                         const r = dataRows[0];
                         // Column mapping for Table 7:
                         // [0]=ลำดับ [1]=เลขภาษี [2]=ชื่อผู้ขาย [3]=เลขคุมe-GP [4]=เลขสัญญา [5]=วันที่ [6]=จำนวนเงิน [7]=สถานะ [8]=เหตุผล
-                        const name = r.length > 2 ? r[2] : '';
-                        const price = r.length > 6 ? r[6] : (r.length > 1 ? r[r.length - 2] : '');
-                        winnersStr = `${name}/ ${price} บาท`.trim();
+
+                        // Extract the amount (จำนวนเงิน) from Table 7
+                        let winnerName = '';
+                        let winnerPrice = r.length > 6 ? r[6] : (r.length > 1 ? r[r.length - 2] : '');
+
+                        // Extract clean numeric price
+                        const wpMatch = winnerPrice.match(/([\d,]+\.\d{2})/);
+                        let cleanWinnerPrice = wpMatch ? wpMatch[1] : winnerPrice;
+                        cleanWinnerPrice = this._formatCurrency(cleanWinnerPrice);
+
+                        // Cross-reference: match Table 7 amount against biddersList from Table 6
+                        if (cleanWinnerPrice && biddersList.length > 1) {
+                            const normalizedWinnerPrice = cleanWinnerPrice.replace(/,/g, '');
+                            const matchedBidder = biddersList.find(b => {
+                                const normalizedBidderPrice = b.price.replace(/,/g, '');
+                                return normalizedBidderPrice === normalizedWinnerPrice;
+                            });
+                            if (matchedBidder) {
+                                winnerName = matchedBidder.name;
+                            }
+                        }
+
+                        // Fallback: use name from Table 7 directly
+                        if (!winnerName) {
+                            winnerName = r.length > 2 ? r[2] : '';
+                        }
+
+                        // Clean winnerPrice — strip "บาท" before formatting
+                        if (cleanWinnerPrice) {
+                            const wpFinal = cleanWinnerPrice.replace(/บาท/g, '').trim();
+                            const wpClean = wpFinal.match(/([\d,]+\.\d{2})/);
+                            winnersStr = wpClean 
+                                ? `${winnerName} / ${wpClean[1]} บาท`.trim()
+                                : `${winnerName}`.trim() || '-';
+                        } else {
+                            winnersStr = `${winnerName}`.trim() || '-';
+                        }
 
                         reason = r[r.length - 1] || '';
 
@@ -443,21 +505,22 @@ class PDFExtractor {
                     }
                 }
 
-                // Always push a row so the user can see results
-                if (projName || budget || items.length > 10) {
-                    egpRows.push([
-                        egpRows.length + 1,
-                        projName || '(ไม่พบชื่อโครงการ)',
-                        budget,
-                        medianPrice,
-                        method,
-                        biddersStr,
-                        winnersStr,
-                        reason,
-                        contractId,
-                        contractDate
-                    ]);
+                // Always push a row for every page — never skip
+                if (!projName && !budget && items.length <= 10) {
+                    console.warn(`[e-GP PDF] Page ${pageNum}: weak extraction (items=${items.length}), still including row`);
                 }
+                egpRows.push([
+                    egpRows.length + 1,
+                    projName || '(ไม่พบชื่อโครงการ)',
+                    budget,
+                    medianPrice,
+                    method,
+                    biddersStr,
+                    winnersStr,
+                    reason,
+                    contractId,
+                    contractDate
+                ]);
 
             } catch (err) {
                 console.warn(`Error processing page ${pageNum} in e-GP mode:`, err);

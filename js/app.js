@@ -18,6 +18,7 @@
     // ===== MODULES =====
     const pdfExtractor = new PDFExtractor();
     const wordExtractor = new WordExtractor();
+    const excelReader = new ExcelReader();
     const columnMapper = new ColumnMapper('mapperColumns');
     const excelExporter = new ExcelExporter();
 
@@ -96,8 +97,9 @@
 
     function handleFile(file) {
         const ext = file.name.split('.').pop().toLowerCase();
-        if (ext !== 'docx') {
-            showToast('รองรับเฉพาะไฟล์ DOCX', 'error');
+        const supportedExts = ['docx', 'xlsx', 'xls'];
+        if (!supportedExts.includes(ext)) {
+            showToast('รองรับเฉพาะไฟล์ DOCX, XLSX, XLS', 'error');
             return;
         }
 
@@ -128,15 +130,25 @@
             // Default to 'egp' mode since the UI was removed
             const extractMode = 'egp';
 
-            if (ext === 'pdf') {
+            if (ext === 'xlsx' || ext === 'xls') {
+                // Excel files: use ExcelReader
+                if (extractMode === 'egp') {
+                    tables = await excelReader.extractEGP(file, onProgress);
+                    // ExcelReader.extractEGP() already maps to 10-column procurement format
+                    const hasProcurement = tables && tables.some(t => t.source === 'excel-procurement');
+                    els.templateSelect.value = hasProcurement ? 'procurement' : 'custom';
+                } else {
+                    tables = await excelReader.extract(file, onProgress);
+                }
+            } else if (ext === 'pdf') {
                 if (extractMode === 'egp') {
                     tables = await pdfExtractor.extractEGP(file, onProgress);
-                    // Auto-select procurement template
                     els.templateSelect.value = 'procurement';
                 } else {
                     tables = await pdfExtractor.extract(file, onProgress);
                 }
             } else {
+                // DOCX files
                 if (extractMode === 'egp') {
                     tables = await wordExtractor.extractEGP(file, onProgress);
                     els.templateSelect.value = 'procurement';
